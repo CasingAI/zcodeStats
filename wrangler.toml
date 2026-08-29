@@ -8,6 +8,10 @@ main = "worker/index.js"
 # 纯静态、无运行时特性依赖；钉死是为了让旧版本地 workerd 也能 `wrangler dev`
 compatibility_date = "2026-08-08"
 
+# Workers Builds 部署链路：wrangler deploy 前自动执行（CI 上没有本机的 dist，必须先构建）
+[build]
+command = "pnpm build"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
