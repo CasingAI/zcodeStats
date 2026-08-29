@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite --port 9737",
     "build": "tsc --noEmit && vite build",

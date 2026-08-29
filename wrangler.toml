@@ -1,0 +1,12 @@
+# Cloudflare Pages 项目配置（官方 "Pages-as-code"）。
+# `pages_build_output_dir` 的存在即声明这是一个 Pages 项目而非 Worker：
+# - Cloudflare 面板 / CI 据此识别构建产物目录为 dist/
+# - `npx wrangler pages deploy` 不带参数即可部署（项目名、产物目录全部自动读取）
+# - `wrangler deploy`（Worker 命令）会直接报错拒绝，防止再被误部署成 Worker
+name = "zcodestats"
+pages_build_output_dir = "dist"
+
+# 纯静态站、无 Functions，此日期不影响任何运行时行为，只在本地 `pages dev`
+# 启动 workerd 时被校验。2026-08-08 是本机 wrangler 4.120 自带 workerd 支持的
+# 上限（再新会被拒启动）；将来升级 wrangler 后可随手更新此日期。
+compatibility_date = "2026-08-08"

@@ -36,11 +36,20 @@
 ## 开发
 
 ```bash
-npm install
-npm run dev        # vite dev server (http://localhost:5173)
-npm run build      # 输出到 dist/
-npm run preview    # 预览 dist/
+pnpm install
+pnpm dev           # vite dev server (http://localhost:9737)
+pnpm build         # 输出到 dist/
+pnpm preview       # 预览 dist/
 ```
+
+## 部署（Cloudflare Pages）
+
+配置即代码：根目录 `wrangler.toml` 声明 `pages_build_output_dir = "dist"`，
+任何部署方式都会被 Cloudflare 识别为 Pages 项目（不会被当成 Worker）。
+
+- **本地部署**：`npx wrangler pages deploy`（自动读取 wrangler.toml 里的项目名 `zcodestats` 和产物目录 `dist`）
+- **Git 集成**：面板里 Connect to Git 选本仓库，构建命令 `pnpm build`（或 `npm run build`），输出目录 `dist`
+- 纯 hash 路由 SPA，无需 `_redirects`；WASM/MIME 由 Pages 自动处理，无需 `_headers`
 
 ## 文件结构
 

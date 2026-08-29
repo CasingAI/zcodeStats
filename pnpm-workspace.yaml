@@ -1,2 +1,9 @@
+# pnpm v10+ 默认不执行依赖的安装脚本（postinstall），需要显式放行 esbuild（vite 的依赖）。
+# 注意：`allowBuilds: esbuild: true` 这一行是 pnpm 11 自己生成并要求填写的，
+# 千万不要改回 "set this to true or false"，否则 pnpm install 会直接报错退出。
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
+
+# pnpm 10 及以下的等价写法，保留以兼容旧版 CI：
+onlyBuiltDependencies:
+  - esbuild
