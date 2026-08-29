@@ -1,0 +1,14 @@
+/* iOS 6-style font stack — text faces first, emoji last */
+
+:root {
+  --app-emoji-font-family: 'Apple Color Emoji', sans-serif;
+  --app-text-font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    'SF Pro Text',
+    'Helvetica Neue',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Segoe UI',
+    var(--app-emoji-font-family);
+}

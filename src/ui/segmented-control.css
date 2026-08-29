@@ -1,0 +1,95 @@
+.segmented-control {
+  --segmented-count: 1;
+  --segmented-index: 0;
+  position: relative;
+  display: flex;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid #888;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #d4d4d4 0%, #ebebeb 100%);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.segmented-control__thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  z-index: 0;
+  width: calc((100% - 4px) / var(--segmented-count));
+  border-radius: 3px;
+  background: linear-gradient(180deg, #6cb3ff 0%, #2f87e2 55%, #1f6ec7 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 1px 1px rgba(0, 0, 0, 0.12);
+  transform: translateX(calc(var(--segmented-index) * 100%));
+  pointer-events: none;
+}
+
+.segmented-control--ready .segmented-control__thumb {
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.segmented-control__item {
+  appearance: none;
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 56px;
+  border: 0;
+  border-radius: 3px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #444;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: visible;
+  transition:
+    color 0.16s ease,
+    text-shadow 0.16s ease;
+}
+
+.segmented-control__item--active {
+  color: #fff;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.segmented-control__item--dirty:not(.segmented-control__item--active)::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: #ff9500;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.65);
+  vertical-align: 2px;
+}
+
+.segmented-control__badge {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  background: #ff3b30;
+  text-shadow: none;
+  vertical-align: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-control--ready .segmented-control__thumb {
+    transition: none;
+  }
+
+  .segmented-control__item {
+    transition: none;
+  }
+}

@@ -1,0 +1,64 @@
+.heatmap-grid {
+  width: 100%;
+  min-width: 0;
+}
+
+.heatmap-grid__inner {
+  display: grid;
+  gap: 1px;
+  border: 1px solid #c8c8cd;
+  border-radius: 6px;
+  background: #c8c8cd;
+  padding: 1px;
+  overflow: hidden;
+}
+
+.heatmap-grid__corner {
+  background: linear-gradient(180deg, #f6f6f8 0%, #e8e8ec 100%);
+}
+
+.heatmap-grid__col-header,
+.heatmap-grid__row-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b6b70;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.85);
+  background: linear-gradient(180deg, #f6f6f8 0%, #ececef 100%);
+  padding: 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heatmap-grid__row-header {
+  justify-content: flex-end;
+  padding-right: 8px;
+}
+
+.heatmap-grid__cell {
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1a1a1a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+  font-variant-numeric: tabular-nums;
+  min-height: 22px;
+  cursor: default;
+  transition: transform 0.06s ease;
+}
+
+.heatmap-grid__cell:hover {
+  transform: scale(1.04);
+  z-index: 1;
+  position: relative;
+}
+
+.heatmap-grid__cell--empty {
+  background: #f6f6f8;
+}
