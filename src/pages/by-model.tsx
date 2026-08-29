@@ -123,6 +123,7 @@ export function ByModelPage({ db }: { db: OpenedDb }) {
             rowKey={(r) => r.groupKey}
             emptyMessage="没有数据"
             onRowClick={(r) => navigate(`model/${encodeURIComponent(r.groupKey)}`)}
+            stickyFirstColumn="240px"
           />
         )}
       </div>

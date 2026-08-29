@@ -7,7 +7,7 @@ import preact from '@preact/preset-vite'
 export default defineConfig({
   plugins: [preact()],
   server: {
-    port: 5173,
+    port: 9737,
     headers: {
       // Required for SharedArrayBuffer in case we ever enable it for the VFS
       'Cross-Origin-Opener-Policy': 'same-origin',

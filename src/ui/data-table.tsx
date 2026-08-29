@@ -27,6 +27,13 @@ export type DataTableProps<Row> = {
   className?: string
   /** 行点击（传入后行显示为可点击样式） */
   onRowClick?: (row: Row, index: number) => void
+  /**
+   * 首列冻结：横向滚动时第一列保持可见。
+   * 传 true 用默认 240px 宽；传字符串可自定义首列宽度（如 '260px'）。
+   * 实现：表格整体在唯一滚动容器内，每行是 grid（首列 + 剩余列两段），
+   * 首列在滚动容器中 sticky。行高由 max(左,右) 自动对齐。
+   */
+  stickyFirstColumn?: boolean | string
 }
 
 export function DataTable<Row>({
@@ -38,6 +45,7 @@ export function DataTable<Row>({
   compact = false,
   className,
   onRowClick,
+  stickyFirstColumn,
 }: DataTableProps<Row>) {
   const wrapClass = `data-table${className ? ` ${className}` : ''}${compact ? ' data-table--compact' : ''}`
 
@@ -69,47 +77,149 @@ export function DataTable<Row>({
   const headerStyle: JSX.CSSProperties = { 'grid-template-columns': template }
   const rowStyle: JSX.CSSProperties = { 'grid-template-columns': template }
 
+  if (stickyFirstColumn) {
+    const firstColWidth =
+      typeof stickyFirstColumn === 'string' ? stickyFirstColumn : '240px'
+    return (
+      <StickyTable<Row>
+        wrapClass={wrapClass}
+        columns={columns}
+        rows={rows}
+        rowKey={rowKey}
+        onRowClick={onRowClick}
+        firstColWidth={firstColWidth}
+      />
+    )
+  }
+
   return (
     <div class={wrapClass} role="table" aria-rowcount={rows.length + 1}>
-      <div class="data-table__header" role="row" style={headerStyle}>
-        {columns.map((c, ci) => (
-          <div
-            key={c.key}
-            class={
-              'data-table__cell data-table__cell--head' +
-              (ci === 0 ? ' data-table__cell--sticky-left' : '')
-            }
-            role="columnheader"
-            data-align={c.align ?? 'left'}
-          >
-            {c.header}
-          </div>
-        ))}
+      <div class="data-table__scroll">
+        <div class="data-table__header" role="row" style={headerStyle}>
+          {columns.map((c) => (
+            <div
+              key={c.key}
+              class="data-table__cell data-table__cell--head"
+              role="columnheader"
+              data-align={c.align ?? 'left'}
+            >
+              {c.header}
+            </div>
+          ))}
+        </div>
+        <div class="data-table__body">
+          {rows.map((row, i) => (
+            <div
+              key={rowKey(row, i)}
+              class={`data-table__row${onRowClick ? ' data-table__row--clickable' : ''}`}
+              role="row"
+              style={rowStyle}
+              onClick={onRowClick ? () => onRowClick(row, i) : undefined}
+            >
+              {columns.map((c) => (
+                <div
+                  key={c.key}
+                  class="data-table__cell"
+                  role="cell"
+                  data-align={c.align ?? 'left'}
+                >
+                  {c.render(row, i)}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
-      <div class="data-table__body">
-        {rows.map((row, i) => (
+    </div>
+  )
+}
+
+// ---- 首列冻结版：每行是单 grid（首列 + 剩余列两段），整表在同一滚动容器内 ----
+
+function StickyTable<Row>({
+  wrapClass,
+  columns,
+  rows,
+  rowKey,
+  onRowClick,
+  firstColWidth,
+}: {
+  wrapClass: string
+  columns: readonly DataTableColumn<Row>[]
+  rows: readonly Row[]
+  rowKey: (row: Row, index: number) => string | number
+  onRowClick?: (row: Row, index: number) => void
+  firstColWidth: string
+}) {
+  const [first, ...rest] = columns
+  const restTemplate = rest
+    .map((c) => {
+      if (c.width) return c.width
+      if (c.flex === false) return 'auto'
+      return 'minmax(0, 1fr)'
+    })
+    .join(' ')
+
+  const rowGridStyle: JSX.CSSProperties = {
+    'grid-template-columns': `${firstColWidth} ${restTemplate || 'minmax(0, 1fr)'}`,
+  }
+
+  return (
+    <div
+      class={wrapClass}
+      role="table"
+      aria-rowcount={rows.length + 1}
+      style={{ '--dt-sticky-col-w': firstColWidth } as JSX.CSSProperties}
+    >
+      <div class="data-table__scroll">
+        <div class="data-table__header data-table__row--sticky-split" role="row" style={rowGridStyle}>
           <div
-            key={rowKey(row, i)}
-            class={`data-table__row${onRowClick ? ' data-table__row--clickable' : ''}`}
-            role="row"
-            style={rowStyle}
-            onClick={onRowClick ? () => onRowClick(row, i) : undefined}
+            class="data-table__cell data-table__cell--head data-table__cell--sticky-left"
+            role="columnheader"
+            data-align={first?.align ?? 'left'}
           >
-            {columns.map((c, ci) => (
-              <div
-                key={c.key}
-                class={
-                  'data-table__cell' +
-                  (ci === 0 ? ' data-table__cell--sticky-left' : '')
-                }
-                role="cell"
-                data-align={c.align ?? 'left'}
-              >
-                {c.render(row, i)}
-              </div>
-            ))}
+            {first?.header}
           </div>
-        ))}
+          {rest.map((c) => (
+            <div
+              key={c.key}
+              class="data-table__cell data-table__cell--head"
+              role="columnheader"
+              data-align={c.align ?? 'left'}
+            >
+              {c.header}
+            </div>
+          ))}
+        </div>
+        <div class="data-table__body">
+          {rows.map((row, i) => (
+            <div
+              key={rowKey(row, i)}
+              class={`data-table__row data-table__row--sticky-split${onRowClick ? ' data-table__row--clickable' : ''}`}
+              role="row"
+              style={rowGridStyle}
+              onClick={onRowClick ? () => onRowClick(row, i) : undefined}
+            >
+              <div
+                class="data-table__cell data-table__cell--sticky-left"
+                role="cell"
+                data-align={first?.align ?? 'left'}
+              >
+                {first ? first.render(row, i) : null}
+              </div>
+              {rest.map((c) => (
+                <div
+                  key={c.key}
+                  class="data-table__cell"
+                  role="cell"
+                  data-align={c.align ?? 'left'}
+                >
+                  {c.render(row, i)}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

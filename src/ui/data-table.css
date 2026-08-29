@@ -8,14 +8,19 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
     0 1px 1px rgba(0, 0, 0, 0.04);
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
+.data-table__scroll {
+  /* 唯一的横向滚动祖先 — sticky 元素相对此吸边 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+}
+
+/* ---- 普通模式（非 sticky）：header/row 都是 grid，列数 = 全部列数 ---- */
 .data-table__header,
 .data-table__row {
-  /* 防止 grid 列在窄容器下被 minmax(0, 1fr) 强行压到 0，
-     让所有列真实宽度相加，超出容器时由 .data-table 出横向滚动条。 */
   width: max-content;
   min-width: 100%;
 }
@@ -41,6 +46,7 @@
 
 .data-table__row {
   display: grid;
+  align-items: center;
   gap: 0;
   padding: 7px 10px;
   border-bottom: 1px solid #ececef;
@@ -95,30 +101,67 @@
   font-weight: 700;
 }
 
-/* 首列冻结：横向滚动时 "模型分组" 这一列保持可见，列头跟行单元都 sticky。
-   z-index 分层：header 单元格在最上（盖住行），行单元格在中间（盖住 body 内容）。 */
+/* ---- 首列冻结模式（stickyFirstColumn）----
+   结构：每行是单 grid，列模板 = "firstColWidth 1fr 1fr ..."
+        header 跟 row 都用同一列模板
+        left cell 在滚动容器内 sticky: left 0
+   行高 = max(左 cell, 右 cells)，由 grid 行轨道自动对齐。
+   left cell 可以多行（如主名 + 灰色子行），right cell 仍单行，
+   grid 把行高拉到多行那侧，right 单元格 grid align-items 默认 stretch
+   会自然填满整行高度（这里我们用 align-items: center 让 right 单元
+   在多出的高度里居中，不至于贴顶或贴底）。 */
+.data-table__row--sticky-split {
+  display: grid;
+  /* 列模板由 TSX 通过 inline style 注入：firstColWidth + 剩余列 */
+  align-items: center;
+  width: max-content;
+  min-width: 100%;
+}
+
+.data-table__header.data-table__row--sticky-split {
+  /* 复用 row--sticky-split 的列模板，header 跟 row 列宽一致 */
+  display: grid;
+  align-items: center;
+  width: max-content;
+  min-width: 100%;
+  padding: 6px 10px;
+  background: linear-gradient(180deg, #f6f6f8 0%, #e8e8ec 100%);
+  border-bottom: 1px solid #c8c8cd;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a4a4f;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.2px;
+  text-transform: none;
+}
+
 .data-table__cell--sticky-left {
   position: sticky;
   left: 0;
-  z-index: 1;
-  background: #fff;
-  /* 用 box-shadow 在右侧画一条分隔线，避开 sticky + 1px border 在
-     横向滚动时的渲染抖动 */
-  box-shadow: 1px 0 0 #ececef;
+  /* header sticky 要盖过 body sticky */
+  z-index: 2;
+  background-color: #fff;
+  background-clip: padding-box;
+  box-shadow: 2px 0 0 #d8d8de;
+  /* left cell 解除 nowrap 限制，允许子行（如别名）换行 */
+  white-space: normal;
+  padding-left: 10px;
 }
 
 .data-table__header > .data-table__cell--sticky-left {
+  /* header cell 仍单行，保持 nowrap */
+  white-space: nowrap;
   /* header 自带渐变背景，这里覆盖成 header 同色 */
-  background: linear-gradient(180deg, #f6f6f8 0%, #e8e8ec 100%);
-  z-index: 2; /* header sticky 要盖过 body sticky */
+  background-image: linear-gradient(180deg, #f6f6f8 0%, #e8e8ec 100%);
+  background-color: transparent;
 }
 
 /* 行 hover 时把 sticky 单元的背景也一起换色 */
 .data-table__row:hover > .data-table__cell--sticky-left {
-  background: #f6f8fc;
+  background-color: #f6f8fc;
 }
 .data-table__row--clickable:hover > .data-table__cell--sticky-left {
-  background: #eaf2fd;
+  background-color: #eaf2fd;
 }
 
 .data-table__empty,

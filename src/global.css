@@ -391,6 +391,8 @@ code {
   display: flex;
   align-items: center;
   gap: 10px;
+  border-bottom: 1px #dddddd solid;
+  padding-bottom: 4px;
 }
 
 .alias-editor__id {
