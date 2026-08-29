@@ -2,13 +2,14 @@ import { useMemo, useState } from 'preact/hooks'
 import { DataTable } from '../ui/data-table.tsx'
 import { IosButton } from '../ui/ios-button.tsx'
 import { SegmentedControl } from '../ui/segmented-control.tsx'
+import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import '../ui/ios-text-field.css'
 import { useQuery } from '../lib/use-query.ts'
 import { navigate } from '../lib/router.ts'
 import {
   QUERIES,
+  rangeSignature,
   shapeByModel,
-  type Range,
 } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { ByModelRow } from '../db/types.ts'
@@ -24,6 +25,7 @@ import {
   useCustomModels,
   useMarks,
 } from '../lib/model-groups.ts'
+import { useRange } from '../lib/range-context.tsx'
 import { builtinModelKeys, isMarkedModel } from '../lib/pricing.ts'
 import { formatCount, formatPct, formatRMB } from '../lib/format.ts'
 
@@ -31,14 +33,15 @@ const BYMODEL_LIMIT = 5000
 
 export function ByModelPage({ db }: { db: OpenedDb }) {
   const [mode, setMode] = useState<GroupMode>('id')
-  const [range, setRange] = useState<Range>('all')
+  const { range, setPreset, setCustom } = useRange()
+  const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
   const marks = useMarks()
   const custom = useCustomModels()
   const [editing, setEditing] = useState(false)
 
   const state = useQuery<ByModelRow[]>(
     db,
-    `by-model:${range}:${marksSignature(marks, custom)}`,
+    `by-model:${rangeSignature(range)}:${marksSignature(marks, custom)}`,
     async (d) => {
       const r = await d.select(QUERIES.byModel(range).sql, QUERIES.byModel(range).bind)
       return shapeByModel(r)
@@ -79,17 +82,7 @@ export function ByModelPage({ db }: { db: OpenedDb }) {
             flex: '0 1 auto',
           }}
         >
-          <SegmentedControl<Range>
-            value={range}
-            onChange={setRange}
-            ariaLabel="时间范围"
-            className="section__control"
-            items={[
-              { id: '7d', label: '近7天' },
-              { id: '30d', label: '近30天' },
-              { id: 'all', label: '全部' },
-            ]}
-          />
+          <RangeSelectorTabs state={rs} ariaLabel="时间范围" className="section__control" />
           <SegmentedControl<GroupMode>
             value={mode}
             onChange={setMode}
@@ -105,6 +98,8 @@ export function ByModelPage({ db }: { db: OpenedDb }) {
           </IosButton>
         </div>
       </div>
+
+      <RangeSelectorPanelForBelow state={rs} />
 
       <div class="section">
         {truncated && (
@@ -442,7 +437,7 @@ const columns = [
       return (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {r.groupKey}
+            {r.displayName}
             {tagged ? (
               <span
                 title="已标记：用户手动指定了计价模型"
@@ -474,11 +469,9 @@ const columns = [
               </span>
             )}
           </span>
-          {r.merged && (
-            <span style={{ fontSize: 10, color: '#8a8a90' }} class="mono">
-              {r.modelIds.join(' · ')}
-            </span>
-          )}
+          <span style={{ fontSize: 10, color: '#8a8a90' }} class="mono">
+            {r.modelIds.join(' · ')}
+          </span>
         </div>
       )
     },

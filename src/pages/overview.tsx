@@ -1,20 +1,21 @@
-import { useState } from 'preact/hooks'
 import { KpiCard } from '../ui/kpi-card.tsx'
-import { SegmentedControl } from '../ui/segmented-control.tsx'
+import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { useQuery } from '../lib/use-query.ts'
-import { QUERIES, shapeByModel, shapeOverview, type Range } from '../db/queries.ts'
+import { QUERIES, rangeSignature, shapeByModel, shapeOverview } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { OverviewKpis } from '../db/types.ts'
 import { marksSignature, useMarks, useCustomModels } from '../lib/model-groups.ts'
+import { useRange } from '../lib/range-context.tsx'
 import { formatCount, formatFull, formatPct, formatRMB } from '../lib/format.ts'
 
 export function OverviewPage({ db }: { db: OpenedDb }) {
-  const [range, setRange] = useState<Range>('30d')
+  const { range, setPreset, setCustom } = useRange()
+  const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
   const marks = useMarks()
   const custom = useCustomModels()
   const state = useQuery<OverviewKpis>(
     db,
-    `overview:${range}:${marksSignature(marks, custom)}`,
+    `overview:${rangeSignature(range)}:${marksSignature(marks, custom)}`,
     async (d) => {
       const [ov, t, m] = await Promise.all([
         d.select(QUERIES.overview(range).sql, QUERIES.overview(range).bind),
@@ -55,17 +56,11 @@ export function OverviewPage({ db }: { db: OpenedDb }) {
             {firstSeenStr} → {lastSeenStr} · 活跃 {k.activeDays} 天
           </p>
         </div>
-        <SegmentedControl<Range>
-          value={range}
-          onChange={setRange}
-          ariaLabel="时间范围"
-          items={[
-            { id: '7d', label: '近7天' },
-            { id: '30d', label: '近30天' },
-            { id: 'all', label: '全部' },
-          ]}
-        />
+        <RangeSelectorTabs state={rs} ariaLabel="时间范围" className="section__control" />
       </div>
+
+      <RangeSelectorPanelForBelow state={rs} />
+
       <KpiGrid data={k} errorRate={errorRate} />
       <div class="section">
         <h2 class="section__title">分项明细</h2>

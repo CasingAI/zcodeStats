@@ -1,23 +1,23 @@
 // 模型分组详情：KPI + uPlot 日趋势 + 0-23 小时分布。
 // 路由：#/model/<encodeURIComponent(分组名)>
 
-import { useMemo, useState } from 'preact/hooks'
+import { useMemo } from 'preact/hooks'
 import uPlot from 'uplot'
 import { IosButton } from '../ui/ios-button.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
-import { SegmentedControl } from '../ui/segmented-control.tsx'
+import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { UPlotChart, toTimeAlignedData } from '../ui/uplot-chart.tsx'
 import { useQuery } from '../lib/use-query.ts'
 import { navigate } from '../lib/router.ts'
 import {
   QUERIES,
+  rangeSignature,
   shapeByDay,
   shapeByDayByModel,
   aggregateCostByDay,
   shapeByHour,
   shapeByModel,
   type ParamQuery,
-  type Range,
 } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { ByDayRow, ByModelRow } from '../db/types.ts'
@@ -28,8 +28,19 @@ import {
   useMarks,
   useCustomModels,
 } from '../lib/model-groups.ts'
+import { useRange } from '../lib/range-context.tsx'
 import { formatCount, formatPct, formatRMB } from '../lib/format.ts'
-import { resolveMatch, type ModelPrice } from '../lib/pricing.ts'
+import { resolveMatch, displayNameOf, builtinModelKeys, type ModelPrice } from '../lib/pricing.ts'
+
+/** 详情页 heading：group 可能是价目表 key 也可能是 raw id，先尝试映射到正式名，失败回退原 group */
+function headingFor(group: string): string {
+  if (TABLE_KEY_SET.has(group)) return displayNameOf(group)
+  const m = resolveMatch(group)
+  if (m.rule !== 'default') return displayNameOf(m.matched)
+  return group
+}
+
+const TABLE_KEY_SET = new Set(builtinModelKeys())
 
 export type PriceMatch = {
   /** 该 model_id 实际计费用的目标模型名（价目表 key） */
@@ -67,13 +78,14 @@ type ModelDetailData = {
 }
 
 export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) {
-  const [range, setRange] = useState<Range>('30d')
+  const { range, setPreset, setCustom } = useRange()
+  const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
   const marks = useMarks()
   const custom = useCustomModels()
 
   const state = useQuery<ModelDetailData>(
     db,
-    `model-detail:${group}:${range}:${marksSignature(marks, custom)}`,
+    `model-detail:${group}:${rangeSignature(range)}:${marksSignature(marks, custom)}`,
     async (d) => {
       // 先拿 range 内的全部 id 行，解析出该分组下的 model_id 集合
       const all: ByModelRow[] = shapeByModel(
@@ -190,18 +202,12 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
         <IosButton tone="secondary" size="compact" onClick={() => navigate('by-model')}>
           ‹ 返回
         </IosButton>
-        <h1 class="page__title mono" style={{ margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group}</h1>
-        <SegmentedControl<Range>
-          value={range}
-          onChange={setRange}
-          ariaLabel="时间范围"
-          items={[
-            { id: '7d', label: '近7天' },
-            { id: '30d', label: '近30天' },
-            { id: 'all', label: '全部' },
-          ]}
-        />
+        <h1 class="page__title mono" style={{ margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headingFor(group)}</h1>
+        <RangeSelectorTabs state={rs} ariaLabel="时间范围" />
       </div>
+
+      <RangeSelectorPanelForBelow state={rs} />
+
       <p
         class="page__subtitle mono"
         style={{ wordBreak: 'break-all', marginTop: -6 }}

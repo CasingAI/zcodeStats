@@ -1,26 +1,27 @@
-import { useState } from 'preact/hooks'
 import { DataTable } from '../ui/data-table.tsx'
-import { SegmentedControl } from '../ui/segmented-control.tsx'
+import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { useQuery } from '../lib/use-query.ts'
 import {
   QUERIES,
+  rangeSignature,
   shapeBySession,
   shapeBySessionByModel,
   aggregateCostBySession,
-  type Range,
 } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { BySessionRow } from '../db/types.ts'
 import { useMarks, useCustomModels, marksSignature } from '../lib/model-groups.ts'
+import { useRange } from '../lib/range-context.tsx'
 import { formatCount, formatDuration, formatRMB } from '../lib/format.ts'
 
 export function BySessionPage({ db }: { db: OpenedDb }) {
-  const [range, setRange] = useState<Range>('all')
+  const { range, setPreset, setCustom } = useRange()
+  const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
   const marks = useMarks()
   const custom = useCustomModels()
   const state = useQuery<BySessionRow[]>(
     db,
-    `by-session:${range}:${marksSignature(marks, custom)}`,
+    `by-session:${rangeSignature(range)}:${marksSignature(marks, custom)}`,
     async (d) => {
       const [s, sbm] = await Promise.all([
         d.select(QUERIES.bySession(range).sql, QUERIES.bySession(range).bind),
@@ -38,17 +39,11 @@ export function BySessionPage({ db }: { db: OpenedDb }) {
           <h1 class="page__title">按会话</h1>
           <p class="page__subtitle">总 token 用量 Top 50 session（按所选时间范围）</p>
         </div>
-        <SegmentedControl<Range>
-          value={range}
-          onChange={setRange}
-          ariaLabel="时间范围"
-          items={[
-            { id: '7d', label: '近7天' },
-            { id: '30d', label: '近30天' },
-            { id: 'all', label: '全部' },
-          ]}
-        />
+        <RangeSelectorTabs state={rs} ariaLabel="时间范围" />
       </div>
+
+      <RangeSelectorPanelForBelow state={rs} />
+
       <div class="section">
         {state.kind === 'loading' && <DataTable columns={columns} rows={[]} rowKey={() => ''} loading />}
         {state.kind === 'error' && <div class="app-banner app-banner--error">{state.error}</div>}

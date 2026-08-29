@@ -22,7 +22,9 @@ import { useEffect, useState } from 'preact/hooks'
 import {
   builtinModelKeys,
   costFor,
+  displayNameOf,
   isRecognizedModel,
+  resolveMatch,
   setCustomModels,
   setMarks,
 } from './pricing.ts'
@@ -268,9 +270,11 @@ export function resolveGroupKey(modelId: string, mode: GroupMode, marks: MarkMap
 }
 
 export type GroupedModelRow = {
-  /** 分组显示名 */
+  /** 分组键（按 ID 模式=原始 id；按名字模式=归一化名/标记值） */
   groupKey: string
-  /** 该组包含的全部 model_id（详情页查询用） */
+  /** 表格首列主标题：识别出的内置模型走价目表 key 形式（如 "minimax-m3"），未识别回退 groupKey */
+  displayName: string
+  /** 该组包含的全部 model_id（详情页查询用 + 副行展示） */
   modelIds: string[]
   /** 是否合并了多个 id */
   merged: boolean
@@ -308,6 +312,7 @@ export function resolveGroups(
     if (!g) {
       g = {
         groupKey: key,
+        displayName: key,
         modelIds: [],
         merged: false,
         marked: false,
@@ -346,6 +351,23 @@ export function resolveGroups(
     const denom = g.inputTokens + g.cacheCreationTokens
     g.cacheHitRate = denom > 0 ? g.cacheReadTokens / denom : 0
     g.share = grandTotal > 0 ? g.totalTokens / grandTotal : 0
+    // 展示主标题：识别出的组用价目表 key 的可读名（如 "MiniMax M3"），未识别回退到 groupKey
+    if (g.recognized) {
+      const firstId = g.modelIds[0] ?? g.groupKey
+      // 优先用 applyBuiltin 拿价目表 key（更稳），否则走 resolveMatch 拿到 matched
+      const builtin = applyBuiltin(firstId)
+      let key: string
+      if (builtin) {
+        key = builtin
+      } else {
+        const m = resolveMatch(firstId)
+        // rule==='default' 意味着落到兜底价，不算"真"识别
+        key = m.rule === 'default' ? g.groupKey : m.matched
+      }
+      g.displayName = displayNameOf(key)
+    } else {
+      g.displayName = g.groupKey
+    }
   }
   out.sort((a, b) => b.totalTokens - a.totalTokens)
   return out

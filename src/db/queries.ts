@@ -28,11 +28,26 @@ import { costFor, type UsageForCost } from '../lib/pricing.ts'
 // 参数化查询：sql 里带 ? 占位符，bind 为对应的绑定值（走 worker 的 bind）。
 export type ParamQuery = { sql: string; bind?: unknown[] }
 
-export type Range = '7d' | '30d' | 'all'
+export type RangePreset = '7d' | '30d' | 'all'
+
+export type Range =
+  | { kind: 'preset'; preset: RangePreset }
+  | { kind: 'custom'; from: number; to: number }
+
+export const DEFAULT_RANGE: Range = { kind: 'preset', preset: '30d' }
+
+/** 给 useQuery 当 key 用的稳定字符串。避免每次 render 都生成新 key。 */
+export function rangeSignature(range: Range): string {
+  if (range.kind === 'preset') return `p:${range.preset}`
+  return `c:${range.from}:${range.to}`
+}
 
 function rangeClause(range: Range): string {
-  if (range === 'all') return ''
-  const ms = (range === '7d' ? 7 : 30) * 86400 * 1000
+  if (range.kind === 'custom') {
+    return `AND started_at >= ${range.from} AND started_at < ${range.to}`
+  }
+  if (range.preset === 'all') return ''
+  const ms = (range.preset === '7d' ? 7 : 30) * 86400 * 1000
   return `AND started_at >= ${Date.now() - ms}`
 }
 
@@ -45,7 +60,7 @@ function modelIdClause(bind: unknown[], modelIds: readonly string[]): string {
 }
 
 export const QUERIES = {
-  overview(range: '7d' | '30d' | 'all'): ParamQuery {
+  overview(range: Range): ParamQuery {
     const sql = `
       SELECT
         COALESCE(SUM(computed_total_tokens), 0)                                 AS totalTokens,
@@ -72,7 +87,7 @@ export const QUERIES = {
    * tool_usage 有 started_at INTEGER（ms epoch）— 与 model_usage 口径一致，
    * 所以走同一个 rangeClause。7d/30d 视图下"工具调用"也会跟着缩。
    */
-  toolOverview(range: '7d' | '30d' | 'all'): ParamQuery {
+  toolOverview(range: Range): ParamQuery {
     const sql = `
       SELECT
         COUNT(*)                                                AS toolCallCount,
@@ -90,7 +105,7 @@ export const QUERIES = {
    * 注意：share 字段在 main thread 由 shapeByModel 重算（用全行总和），
    * SQL 里的 share 是占位，下游直接覆盖。
    */
-  byModel(range: '7d' | '30d' | 'all'): ParamQuery {
+  byModel(range: Range): ParamQuery {
     const sql = `
       WITH agg AS (
         SELECT
@@ -133,7 +148,7 @@ export const QUERIES = {
     return { sql }
   },
 
-  byDay(range: '7d' | '30d' | 'all', modelIds: readonly string[] = []): ParamQuery {
+  byDay(range: Range, modelIds: readonly string[] = []): ParamQuery {
     const bind: unknown[] = []
     const sql = `
       SELECT
@@ -157,7 +172,7 @@ export const QUERIES = {
     return { sql, bind: bind.length > 0 ? bind : undefined }
   },
 
-  bySession(range: '7d' | '30d' | 'all'): ParamQuery {
+  bySession(range: Range): ParamQuery {
     const sql = `
       WITH s AS (
         SELECT
@@ -193,7 +208,7 @@ export const QUERIES = {
     return { sql }
   },
 
-  byHour(range: '7d' | '30d' | 'all', modelIds: readonly string[] = []): ParamQuery {
+  byHour(range: Range, modelIds: readonly string[] = []): ParamQuery {
     const bind: unknown[] = []
     const sql = `
       SELECT
@@ -212,7 +227,7 @@ export const QUERIES = {
    * 按"日 × model_id"展开：每行 4 项分项 token，用于按日成本曲线。每行的
    * 4 个数值会在主线程按 model_id 单价加权成成本。
    */
-  byDayByModel(range: '7d' | '30d' | 'all'): ParamQuery {
+  byDayByModel(range: Range): ParamQuery {
     const sql = `
       SELECT
         strftime('%Y-%m-%d', started_at/1000, 'unixepoch') AS day,
@@ -234,7 +249,7 @@ export const QUERIES = {
    * 按 "session_id × model_id" 展开：每行 4 项分项 token，用于按会话成本列。
    * 主线程会按 model_id 单价加权求和。
    */
-  bySessionByModel(range: '7d' | '30d' | 'all'): ParamQuery {
+  bySessionByModel(range: Range): ParamQuery {
     const sql = `
       SELECT
         session_id                                          AS sessionId,

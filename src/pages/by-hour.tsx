@@ -1,17 +1,18 @@
-import { useState } from 'preact/hooks'
 import { HeatmapGrid, type HeatmapCell } from '../ui/heatmap-grid.tsx'
-import { SegmentedControl } from '../ui/segmented-control.tsx'
+import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { useQuery } from '../lib/use-query.ts'
-import { QUERIES, shapeByHour, type Range } from '../db/queries.ts'
+import { QUERIES, rangeSignature, shapeByHour } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { ByHourGrid as ByHourGridT } from '../db/types.ts'
+import { useRange } from '../lib/range-context.tsx'
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
 
 export function ByHourPage({ db }: { db: OpenedDb }) {
-  const [range, setRange] = useState<Range>('all')
-  const state = useQuery<ByHourGridT>(db, `by-hour:${range}`, async (d) => {
+  const { range, setPreset, setCustom } = useRange()
+  const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
+  const state = useQuery<ByHourGridT>(db, `by-hour:${rangeSignature(range)}`, async (d) => {
     const q = QUERIES.byHour(range)
     const r = await d.select(q.sql, q.bind)
     return shapeByHour(r)
@@ -23,17 +24,11 @@ export function ByHourPage({ db }: { db: OpenedDb }) {
           <h1 class="page__title">按小时热力</h1>
           <p class="page__subtitle">一周 × 24 小时，色块越深 token 用量越多</p>
         </div>
-        <SegmentedControl<Range>
-          value={range}
-          onChange={setRange}
-          ariaLabel="时间范围"
-          items={[
-            { id: '7d', label: '近7天' },
-            { id: '30d', label: '近30天' },
-            { id: 'all', label: '全部' },
-          ]}
-        />
+        <RangeSelectorTabs state={rs} ariaLabel="时间范围" />
       </div>
+
+      <RangeSelectorPanelForBelow state={rs} />
+
       <div class="section">
         {state.kind === 'loading' && <div class="app-banner">加载中…</div>}
         {state.kind === 'error' && <div class="app-banner app-banner--error">{state.error}</div>}

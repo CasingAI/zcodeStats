@@ -110,6 +110,68 @@ export function builtinModelKeys(): string[] {
   return Object.keys(TABLE).sort()
 }
 
+/**
+ * 内置价目表 key → 人类可读展示名。
+ * 没在表里的 key 走 fallbackFormatter（拆 kebab/camel 为词）。
+ * 用户在主流程里看到的就是这个，价目表 key 只在子行 / 详情页用。
+ */
+const DISPLAY_NAMES: Record<string, string> = {
+  'deepseek-v4-flash': 'DeepSeek V4 Flash',
+  'deepseek-v4-pro': 'DeepSeek V4 Pro',
+  minimax: 'MiniMax M3',
+  'minimax-m3': 'MiniMax M3',
+  'GLM-5.3-Flash': 'GLM 5.3 Flash',
+  'GLM-5.3': 'GLM 5.3',
+  'mimo-v2.5-pro': 'Mimo V2.5 Pro',
+  'kimi-for-coding': 'Kimi for Coding',
+  'mimo-v2.5': 'Mimo V2.5',
+  'glm-5.2': 'GLM 5.2',
+  'Kimi K3': 'Kimi K3',
+  'GLM-5-Turbo': 'GLM 5 Turbo',
+  'grok-4.6': 'Grok 4.6',
+  'grok-4.5': 'Grok 4.5',
+  'grok-4.3': 'Grok 4.3',
+  'grok-4.20': 'Grok 4.20',
+  'grok-build-0.1': 'Grok Build 0.1',
+  'gpt-5.6-sol': 'GPT-5.6 Sol',
+  'gpt-5.6-terra': 'GPT-5.6 Terra',
+  'gpt-5.6-luna': 'GPT-5.6 Luna',
+  'gpt-5.5': 'GPT-5.5',
+  'gpt-5.4': 'GPT-5.4',
+  'gpt-5.4-mini': 'GPT-5.4 Mini',
+  'gpt-5.4-nano': 'GPT-5.4 Nano',
+  'gpt-5': 'GPT-5',
+  'gpt-5-mini': 'GPT-5 Mini',
+  'gpt-5-nano': 'GPT-5 Nano',
+  'gpt-4o': 'GPT-4o',
+  'gpt-4o-mini': 'GPT-4o Mini',
+  'claude-opus-5': 'Claude Opus 5',
+  'claude-opus-4.8': 'Claude Opus 4.8',
+  'claude-sonnet-4.6': 'Claude Sonnet 4.6',
+  'claude-haiku-4.5': 'Claude Haiku 4.5',
+}
+
+function fallbackDisplayName(key: string): string {
+  // 拆 '-', '.', '_' 为词边界；首字母大写；保留数字 / 大写缩写（连续大写按一段处理）
+  const parts = key.split(/[-._]/).filter(Boolean)
+  return parts
+    .map((p) => {
+      // 全大写（如 GLM、K3、4.6）保留
+      if (/^[A-Z0-9]+(\.[A-Z0-9]+)*$/.test(p)) return p
+      // 全小写（gpt、claude）→ 首字母大写
+      if (/^[a-z]+$/.test(p)) return p[0]!.toUpperCase() + p.slice(1)
+      // 其它原样
+      return p
+    })
+    .join(' ')
+}
+
+/** 把价目表 key 翻译成人类可读展示名。命中 DISPLAY_NAMES 用映射；否则 fallback。 */
+export function displayNameOf(key: string): string {
+  if (DISPLAY_NAMES[key]) return DISPLAY_NAMES[key]
+  return fallbackDisplayName(key)
+}
+
 /** 内部 / 测试用：读当前 marks 快照。 */
 export function getMarks(): Record<string, string> {
   return marks

@@ -1,32 +1,35 @@
 import { useState } from 'preact/hooks'
 import { UPlotChart, toTimeAlignedData } from '../ui/uplot-chart.tsx'
 import { SegmentedControl } from '../ui/segmented-control.tsx'
+import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
 import { useQuery } from '../lib/use-query.ts'
 import {
   QUERIES,
+  rangeSignature,
   shapeByDay,
   shapeByDayByModel,
   aggregateCostByDay,
-  type Range,
   type ParamQuery,
 } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { ByDayRow } from '../db/types.ts'
 import { useMarks, useCustomModels, marksSignature } from '../lib/model-groups.ts'
+import { useRange } from '../lib/range-context.tsx'
 import { formatCount, formatRMB } from '../lib/format.ts'
 
 type Metric = 'token' | 'cost'
 
 export function ByDayPage({ db }: { db: OpenedDb }) {
-  const [range, setRange] = useState<Range>('30d')
+  const { range, setPreset, setCustom } = useRange()
+  const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
   const [metric, setMetric] = useState<Metric>('token')
   const marks = useMarks()
   const custom = useCustomModels()
 
   const state = useQuery<{ rows: ByDayRow[]; totalCost: number; activeDays: number }>(
     db,
-    `by-day:${range}:${marksSignature(marks, custom)}`,
+    `by-day:${rangeSignature(range)}:${marksSignature(marks, custom)}`,
     async (d) => {
       const dayQ: ParamQuery = QUERIES.byDay(range)
       const dbyM: ParamQuery = QUERIES.byDayByModel(range)
@@ -59,18 +62,11 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
               { id: 'cost', label: '成本' },
             ]}
           />
-          <SegmentedControl<Range>
-            value={range}
-            onChange={setRange}
-            ariaLabel="时间范围"
-            items={[
-              { id: '7d', label: '近7天' },
-              { id: '30d', label: '近30天' },
-              { id: 'all', label: '全部' },
-            ]}
-          />
+          <RangeSelectorTabs state={rs} ariaLabel="时间范围" />
         </div>
       </div>
+
+      <RangeSelectorPanelForBelow state={rs} />
 
       <div class="section">
         {state.kind === 'loading' && <div class="app-banner">加载中…</div>}

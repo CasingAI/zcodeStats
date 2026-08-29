@@ -1,0 +1,48 @@
+/* RangeSelector 默认用法：单根 div 内部 column 排 tab + custom（向后兼容）。
+   推荐用法：RangeSelectorTabs 放 section__header 内，RangeSelectorPanelForBelow
+   外层包了 .range-selector__subheader，放到 section__header 之外、section 之内的
+   兄弟位置（custom 面板作为独立行、跟 .section__header 语义对应）。
+   tab 容器自身 min-width 256px，custom 容器 white-space: nowrap。 */
+
+.range-selector {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.range-selector__tabs {
+  min-width: 256px;
+}
+
+/* 语义容器：跟 .section__header 对应，作为 section__header 的"下一段"，由
+   RangeSelectorPanelForBelow 渲染。负责右对齐和上下间距。 */
+.range-selector__subheader {
+  display: block;
+  margin-top: 8px;
+}
+
+.range-selector__subheader > .range-selector__custom {
+  width: 100%;
+}
+
+.range-selector__custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #d8d8de;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #fafafb 0%, #f0f0f3 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.range-selector__current {
+  font-size: 11px;
+  color: #6b6b70;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
