@@ -3,6 +3,7 @@
 # 千万不要改回 "set this to true or false"，否则 pnpm install 会直接报错退出。
 allowBuilds:
   esbuild: true
+  workerd: true
 
 # pnpm 10 及以下的等价写法，保留以兼容旧版 CI：
 onlyBuiltDependencies:
