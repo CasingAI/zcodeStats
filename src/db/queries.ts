@@ -57,12 +57,13 @@ export const QUERIES = {
         COUNT(*)                                                                 AS modelCallCount,
         SUM(CASE WHEN status='error' THEN 1 ELSE 0 END)                          AS modelErrorCount,
         SUM(CASE WHEN context_exceeded=1 THEN 1 ELSE 0 END)                      AS contextExceededCount,
+        SUM(CASE WHEN cancelled_by_user=1 THEN 1 ELSE 0 END)                     AS cancelCount,
         COALESCE(SUM(retry_count), 0)                                            AS retryTotal,
         MIN(started_at)                                                          AS firstSeen,
         MAX(started_at)                                                          AS lastSeen,
         COUNT(DISTINCT strftime('%Y-%m-%d', started_at/1000, 'unixepoch'))       AS activeDays
       FROM model_usage
-      WHERE status='completed' ${rangeClause(range)}
+      WHERE 1=1 ${rangeClause(range)}
     `
     return { sql }
   },
@@ -307,8 +308,9 @@ export const QUERIES = {
   `,
 
   /**
-   * 错误 / 上下文超限行的成本明细：每行 (model_id, 各分项 token)。
+   * 错误 / 上下文超限 / 取消 / 含重试行的成本明细：每行 (model_id, 各分项 token)。
    * 主线程按 model_id 单价加权求和 = "错误 / 重试烧掉的钱"。
+   * retry_count>0 的成功行被纳入,因重试产生的 token 成本只发生在这些行上。
    */
   errorsByModel: `
     SELECT
@@ -319,7 +321,10 @@ export const QUERIES = {
       SUM(cache_read_input_tokens)                        AS cacheReadTokens,
       SUM(cache_creation_input_tokens)                    AS cacheCreationTokens
     FROM model_usage
-    WHERE status='error' OR context_exceeded=1 OR cancelled_by_user=1
+    WHERE status='error'
+       OR context_exceeded=1
+       OR cancelled_by_user=1
+       OR retry_count > 0
     GROUP BY model_id
   `,
 } as const
@@ -380,10 +385,11 @@ export function shapeOverview(
     modelCallCount: toNumber(m[6]),
     modelErrorCount: toNumber(m[7]),
     contextExceededCount: toNumber(m[8]),
-    retryTotal: toNumber(m[9]),
-    firstSeen: toNumberOrNull(m[10]),
-    lastSeen: toNumberOrNull(m[11]),
-    activeDays: toNumber(m[12]),
+    cancelCount: toNumber(m[9]),
+    retryTotal: toNumber(m[10]),
+    firstSeen: toNumberOrNull(m[11]),
+    lastSeen: toNumberOrNull(m[12]),
+    activeDays: toNumber(m[13]),
     toolCallCount: toNumber(t[0]),
     toolErrorCount: toNumber(t[1]),
     cacheHitRate,

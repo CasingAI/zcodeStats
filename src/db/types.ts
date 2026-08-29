@@ -12,6 +12,7 @@ export type OverviewKpis = {
   modelCallCount: number
   modelErrorCount: number
   contextExceededCount: number
+  cancelCount: number
   toolCallCount: number
   toolErrorCount: number
   retryTotal: number

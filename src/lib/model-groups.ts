@@ -231,12 +231,25 @@ export function normalizeModelName(modelId: string): string {
 /**
  * 内置别名表查表：命中返回映射后的 id；不命中返回 null。
  * 与 normalizeModelName 拆开 — 避免污染纯切尾段的 utility。
+ *
+ * 与 pricing.BUILTIN_ALIASES_LC 保持同源（任一处新增都需要同步另一处）。
+ * 提供多 key 同映射：覆盖带 / 不带 provider 前缀的同模型路由。
  */
 export function applyBuiltin(modelId: string): string | null {
   const BUILTIN_ALIASES_LC: Record<string, string> = {
     'openrouter/sonoma/stealth/ox-alpha': 'GLM-5.3-Flash',
     'openrouter/sonoma/stealth/ox': 'GLM-5.3-Flash',
     'openrouter/sonoma/stealth': 'GLM-5.3-Flash',
+    'sonoma/stealth/ox-alpha': 'GLM-5.3-Flash',
+    'sonoma/stealth/ox': 'GLM-5.3-Flash',
+    'sonoma/stealth': 'GLM-5.3-Flash',
+    'stealth/ox-alpha': 'GLM-5.3-Flash',
+    'stealth/ox': 'GLM-5.3-Flash',
+    'stealth': 'GLM-5.3-Flash',
+    'minimax/minimax-m3:free': 'minimax-m3',
+    'minimax-m3:free': 'minimax-m3',
+    'deepseek-latest': 'deepseek-v4-flash',
+    'deepseek-latest:free': 'deepseek-v4-flash',
   }
   return BUILTIN_ALIASES_LC[modelId.toLowerCase()] ?? null
 }

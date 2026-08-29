@@ -105,7 +105,9 @@ function KpiGrid(props: { data?: OverviewKpis; errorRate?: number; loading?: boo
         tone={errorRate > 0.05 ? 'red' : 'default'}
         loading={loading}
         value={data ? formatPct(errorRate) : ''}
-        sub={data ? `错误 ${data.modelErrorCount} · 取消 ${data.contextExceededCount} 上下文超限` : ''}
+        sub={data
+          ? `错误 ${data.modelErrorCount} · 取消 ${data.cancelCount} · 上下文超限 ${data.contextExceededCount}`
+          : ''}
       />
       <KpiCard
         label="重试"

@@ -65,11 +65,26 @@ const TABLE: Record<string, ModelPrice> = {
  * 内置别名（保持跟 model-groups.ts applyBuiltin 同步）：键全小写，
  * 命中后返回价目表里存在的目标 id。这里是 pricing 的本地副本，
  * 避免运行时依赖 model-groups。
+ *
+ * 同模型不同路由会同时给多个 key：
+ *   - openrouter/sonoma/stealth/* → GLM-5.3-Flash（伪装路由）
+ *   - minimax-m3:free / minimax/minimax-m3:free → minimax-m3（:free 是免费档路由）
+ *   - deepseek-latest / deepseek-latest:free → deepseek-v4-flash（"latest" 当前指 v4-flash）
  */
 const BUILTIN_ALIASES_LC: Record<string, string> = {
   'openrouter/sonoma/stealth/ox-alpha': 'GLM-5.3-Flash',
   'openrouter/sonoma/stealth/ox': 'GLM-5.3-Flash',
   'openrouter/sonoma/stealth': 'GLM-5.3-Flash',
+  'sonoma/stealth/ox-alpha': 'GLM-5.3-Flash',
+  'sonoma/stealth/ox': 'GLM-5.3-Flash',
+  'sonoma/stealth': 'GLM-5.3-Flash',
+  'stealth/ox-alpha': 'GLM-5.3-Flash',
+  'stealth/ox': 'GLM-5.3-Flash',
+  'stealth': 'GLM-5.3-Flash',
+  'minimax/minimax-m3:free': 'minimax-m3',
+  'minimax-m3:free': 'minimax-m3',
+  'deepseek-latest': 'deepseek-v4-flash',
+  'deepseek-latest:free': 'deepseek-v4-flash',
 }
 
 // ---- 用户注入的注册表 ----
@@ -130,32 +145,52 @@ function customKeyByName(name: string): string | null {
   return null
 }
 
-function findInTableKey(modelId: string): string {
-  // 1) 用户标记：精确命中内置或自定义
+/** 匹配规则 + 命中目标 + 单价。一次走完匹配链返回所有信息。 */
+type Resolved = {
+  price: ModelPrice
+  matched: string
+  rule: 'mark' | 'exact' | 'normalized' | 'custom-normalized' | 'builtin-alias' | 'default'
+}
+
+function resolvePrice(modelId: string): Resolved {
+  // 1) 标记
   const marked = marks[modelId]
   if (marked) {
     const inTable = tableKeyByName(marked)
-    if (inTable) return inTable
+    if (inTable) return { price: TABLE[inTable]!, matched: inTable, rule: 'mark' }
     const inCustom = customKeyByName(marked)
-    if (inCustom) return inCustom
-    // 悬空标记（目标被删了）→ 当作未标记，继续往下走
+    if (inCustom)
+      return { price: customModels[inCustom]!, matched: inCustom, rule: 'mark' }
+    // 悬空：fall through
   }
-  // 2) 精确匹配 TABLE
-  if (TABLE[modelId]) return modelId
-  // 3) 归一化后匹配 TABLE
+  // 2) 精确
+  if (TABLE[modelId]) {
+    return { price: TABLE[modelId]!, matched: modelId, rule: 'exact' }
+  }
+  // 3) 归一化
   const norm = normalizeForPrice(modelId).toLowerCase().trim()
   for (const key of Object.keys(TABLE)) {
-    if (normalizeForPrice(key).toLowerCase().trim() === norm) return key
+    if (normalizeForPrice(key).toLowerCase().trim() === norm) {
+      return { price: TABLE[key]!, matched: key, rule: 'normalized' }
+    }
   }
-  // 4) 归一化后匹配自定义
+  // 4) 自定义归一化
   for (const key of Object.keys(customModels)) {
-    if (normalizeForPrice(key).toLowerCase().trim() === norm) return key
+    if (normalizeForPrice(key).toLowerCase().trim() === norm) {
+      return { price: customModels[key]!, matched: key, rule: 'custom-normalized' }
+    }
   }
-  // 5) 内置别名（与 model-groups.applyBuiltin 行为一致；大小写不敏感）
+  // 5) 内置别名
   const builtin = BUILTIN_ALIASES_LC[modelId.toLowerCase()]
-  if (builtin) return builtin
+  if (builtin) {
+    return { price: TABLE[builtin]!, matched: builtin, rule: 'builtin-alias' }
+  }
   // 6) 默认
-  return 'deepseek-v4-pro'
+  return {
+    price: TABLE['deepseek-v4-pro']!,
+    matched: 'deepseek-v4-pro',
+    rule: 'default',
+  }
 }
 
 // 模糊匹配缓存，按 dbKey 隔离。默认 'default' 是没传 key 时的兜底。
@@ -178,30 +213,27 @@ function findInTable(
   const cache = getCache(dbKey)
   const cached = cache.get(modelId)
   if (cached) return cached
-  const matched = findInTableKey(modelId)
-  const price = TABLE[matched] ?? customModels[matched]
-  if (!price) {
-    // 理论上不会到这（findInTableKey 永远返回某个 key，且默认 deepseek-v4-pro 在 TABLE 里）
-    // 但保险起见
-    const fallback = TABLE['deepseek-v4-pro']!
-    return { price: fallback, matched: 'deepseek-v4-pro (默认)' }
-  }
-  const isDefault = matched === 'deepseek-v4-pro' && !TABLE[modelId] && !BUILTIN_ALIASES_LC[modelId.toLowerCase()] && !isMarkedToRecognized(modelId)
-  const displayMatched =
-    isMarkedToRecognized(modelId) && !TABLE[modelId] && !BUILTIN_ALIASES_LC[modelId.toLowerCase()]
-      ? `${matched} (按标记)`
-      : isDefault
-        ? 'deepseek-v4-pro (默认)'
-        : matched
-  const hit = { price, matched: displayMatched }
+  const r = resolvePrice(modelId)
+  const display =
+    r.rule === 'mark'
+      ? `${r.matched} (按标记)`
+      : r.rule === 'default'
+        ? `${r.matched} (默认)`
+        : r.matched
+  const hit = { price: r.price, matched: display }
   cache.set(modelId, hit)
   return hit
 }
 
-function isMarkedToRecognized(modelId: string): boolean {
-  const m = marks[modelId]
-  if (!m) return false
-  return tableKeyByName(m) !== null || customKeyByName(m) !== null
+/**
+ * 不走 cache 的纯函数版"匹配 + 单价"。用于 UI 展示（每个 modelId 调用一次，开销可忽略）。
+ */
+export function resolveMatch(modelId: string): {
+  price: ModelPrice
+  matched: string
+  rule: Resolved['rule']
+} {
+  return resolvePrice(modelId)
 }
 
 /** 清空匹配缓存。dbKey='*' 清全部；不传清 default。 */

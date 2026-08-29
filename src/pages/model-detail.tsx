@@ -1,7 +1,7 @@
 // 模型分组详情：KPI + uPlot 日趋势 + 0-23 小时分布。
 // 路由：#/model/<encodeURIComponent(分组名)>
 
-import { useState } from 'preact/hooks'
+import { useMemo, useState } from 'preact/hooks'
 import uPlot from 'uplot'
 import { IosButton } from '../ui/ios-button.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
@@ -29,6 +29,16 @@ import {
   useCustomModels,
 } from '../lib/model-groups.ts'
 import { formatCount, formatPct, formatRMB } from '../lib/format.ts'
+import { resolveMatch, type ModelPrice } from '../lib/pricing.ts'
+
+export type PriceMatch = {
+  /** 该 model_id 实际计费用的目标模型名（价目表 key） */
+  matched: string
+  /** 该目标模型的三档单价（¥/1M） */
+  price: ModelPrice
+  /** 匹配规则：标记 / 精确 / 归一化 / 内置别名 / 默认 */
+  rule: 'mark' | 'exact' | 'normalized' | 'custom-normalized' | 'builtin-alias' | 'default'
+}
 
 type ModelDetailData = {
   ids: string[]
@@ -41,6 +51,19 @@ type ModelDetailData = {
   /** 0-23 时的 token 聚合（对 weekday 折叠） */
   hourTokens: number[]
   hourCalls: number[]
+  /** 每个 model_id 对应的「实际计费目标 + 规则」（按 ids 同序） */
+  priceMatches: PriceMatch[]
+  /** 每个 model_id 的 token 拆分（用于价格计算法区块） */
+  perIdTokens: ReadonlyMap<
+    string,
+    {
+      input: number
+      output: number
+      reasoning: number
+      cacheRead: number
+      cacheCreation: number
+    }
+  >
 }
 
 export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) {
@@ -58,7 +81,9 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
       )
       // 命中规则与列表页两种聚合方式保持一致：id 完全相等、名字归一化相等、
       // 或标记值相等，任一满足即归入该分组。
-      const ids = all
+      // dedup 关键：后续 SQL IN、priceMatches、perIdTokens 都按 ids 遍历，
+      // 不去重会让 4 个同 model_id 不同 provider 的行被 token 累加 4 次（→ 4 倍价目）。
+      const rawIds = all
         .map((r) => r.modelId)
         .filter(
           (id) =>
@@ -67,7 +92,8 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
               normalizeModelName(id) === group ||
               resolveGroupKey(id, 'name', marks) === group),
         )
-      const own = all.filter((r) => ids.includes(r.modelId))
+      const ids = dedupPreserveOrder(rawIds)
+      const own = all.filter((r) => r.modelId !== '' && ids.includes(r.modelId))
 
       let calls = 0
       let totalTokens = 0
@@ -76,6 +102,17 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
       let cacheCreation = 0
       let cacheRead = 0
       let cost = 0
+      // 按 modelId 各自累加 token：价格计算法区块需要拆分到每个 (matched, rule) bucket
+      const perId = new Map<
+        string,
+        {
+          input: number
+          output: number
+          reasoning: number
+          cacheRead: number
+          cacheCreation: number
+        }
+      >()
       for (const r of own) {
         calls += r.calls
         totalTokens += r.totalTokens
@@ -84,6 +121,19 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
         cacheCreation += r.cacheCreationTokens
         cacheRead += r.cacheReadTokens
         cost += r.cost
+        const cur = perId.get(r.modelId) ?? {
+          input: 0,
+          output: 0,
+          reasoning: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+        }
+        cur.input += r.inputTokens
+        cur.output += r.outputTokens
+        cur.reasoning += r.reasoningTokens
+        cur.cacheRead += r.cacheReadTokens
+        cur.cacheCreation += r.cacheCreationTokens
+        perId.set(r.modelId, cur)
       }
       const cacheHitRate =
         inputTokens + cacheCreation > 0 ? cacheRead / (inputTokens + cacheCreation) : 0
@@ -111,7 +161,26 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
         hourCalls[c.hour]! += c.calls
       }
 
-      return { ids, calls, totalTokens, errorCount, cacheHitRate, cost, daily, hourTokens, hourCalls }
+      // 每个 model_id 的价目匹配（用于详情页"价目匹配"区块）。
+      // 用 ids 同序；ids 里的 id 都在分组的 own 里，至少有一个 row。
+      const priceMatches: PriceMatch[] = ids.map((id) => {
+        const r = resolveMatch(id)
+        return { matched: r.matched, price: r.price, rule: r.rule }
+      })
+
+      return {
+        ids,
+        calls,
+        totalTokens,
+        errorCount,
+        cacheHitRate,
+        cost,
+        daily,
+        hourTokens,
+        hourCalls,
+        priceMatches,
+        perIdTokens: perId,
+      }
     },
   )
 
@@ -162,7 +231,22 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
               label="大致成本"
               value={formatRMB(state.data.cost)}
               tone="orange"
-              sub="按价目表 / 标记估算"
+              sub={costSubLine(state.data.priceMatches)}
+            />
+          </div>
+
+          <div class="section">
+            <h2 class="section__title">价目匹配</h2>
+            <PriceMatchTable ids={state.data.ids} matches={state.data.priceMatches} />
+          </div>
+
+          <div class="section">
+            <h2 class="section__title">价格计算法</h2>
+            <PriceFormulaSection
+              ids={state.data.ids}
+              matches={state.data.priceMatches}
+              perIdTokens={state.data.perIdTokens}
+              totalCost={state.data.cost}
             />
           </div>
 
@@ -246,4 +330,355 @@ function dedupPreserveOrder(arr: string[]): string[] {
     }
   }
   return out
+}
+
+// ---- 价目匹配区块 ----
+
+const RULE_LABEL: Record<PriceMatch['rule'], string> = {
+  mark: '已标记',
+  exact: '精确',
+  normalized: '归一化',
+  'custom-normalized': '归一化(自定义)',
+  'builtin-alias': '内置别名',
+  default: '默认兜底',
+}
+
+function PriceMatchTable({
+  ids,
+  matches,
+}: {
+  ids: readonly string[]
+  matches: readonly PriceMatch[]
+}) {
+  // 合并规则：同一组 model_id 若 (matched, rule) 完全一致 → 合并成一行。
+  // 常见场景：按名字聚合模式下，几个 raw id 全部命中同一目标（如 4 个 GLM-5.3 全是精确匹配），
+  // 此时每行列出完全一样的内容，浪费空间；合并后只显示一次价目，model_id 用 ' · ' 拼接。
+  const rows = useMemo(() => {
+    const buckets = new Map<
+      string,
+      { ids: string[]; matched: string; rule: PriceMatch['rule']; price: ModelPrice }
+    >()
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i] ?? ''
+      const m = matches[i]
+      if (!id || !m) continue
+      const key = `${m.matched}\u0000${m.rule}`
+      const b = buckets.get(key)
+      if (b) {
+        b.ids.push(id)
+      } else {
+        buckets.set(key, {
+          ids: [id],
+          matched: m.matched,
+          rule: m.rule,
+          price: m.price,
+        })
+      }
+    }
+    return [...buckets.values()]
+  }, [ids, matches])
+
+  const totalIds = ids.length
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table
+        style={{
+          width: '100%',
+          borderCollapse: 'collapse',
+          fontSize: 12,
+          color: '#1c1c1e',
+        }}
+      >
+        <thead>
+          <tr style={{ textAlign: 'left', color: '#6a6a6f', fontWeight: 500 }}>
+            <th style={th()}>model_id</th>
+            <th style={th()}>实际计费</th>
+            <th style={{ ...th(), textAlign: 'right' }}>输入 ¥/1M</th>
+            <th style={{ ...th(), textAlign: 'right' }}>输出 ¥/1M</th>
+            <th style={{ ...th(), textAlign: 'right' }}>缓存读 ¥/1M</th>
+            <th style={th()}>匹配规则</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={`${r.matched}\u0000${r.rule}`} style={{ borderTop: '1px solid #ececef' }}>
+              <td
+                class="mono"
+                style={{ ...td(), wordBreak: 'break-all', maxWidth: 360 }}
+              >
+                {r.ids.join(' · ')}
+                {r.ids.length > 1 && (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 10,
+                      color: '#8a8a90',
+                    }}
+                    title={`该行合并了 ${r.ids.length} 个 model_id`}
+                  >
+                    （{r.ids.length} 个）
+                  </span>
+                )}
+              </td>
+              <td class="mono" style={td()}>{r.matched}</td>
+              <td style={{ ...td(), textAlign: 'right' }}>{r.price.input.toFixed(2)}</td>
+              <td style={{ ...td(), textAlign: 'right' }}>{r.price.output.toFixed(2)}</td>
+              <td style={{ ...td(), textAlign: 'right' }}>{r.price.cacheInput.toFixed(2)}</td>
+              <td style={td()}>
+                <span style={ruleTag(r.rule)} title={RULE_LABEL[r.rule]}>
+                  {RULE_LABEL[r.rule]}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length < totalIds && (
+        <div style={{ fontSize: 10, color: '#8a8a90', marginTop: 6 }}>
+          共 {totalIds} 个 model_id，合并后 {rows.length} 条价目。
+        </div>
+      )}
+    </div>
+  )
+}
+
+function th(): preact.JSX.CSSProperties {
+  return {
+    padding: '6px 8px',
+    borderBottom: '1px solid #ececef',
+    fontWeight: 500,
+    fontSize: 11,
+  }
+}
+
+function td(): preact.JSX.CSSProperties {
+  return { padding: '6px 8px', verticalAlign: 'top' }
+}
+
+function ruleTag(rule: PriceMatch['rule']): preact.JSX.CSSProperties {
+  const isDefault = rule === 'default'
+  return {
+    fontSize: 9,
+    fontWeight: 700,
+    color: isDefault ? '#a23b3b' : '#1f6f43',
+    background: isDefault ? '#fde2e2' : '#d4f4e1',
+    borderRadius: 6,
+    padding: '1px 5px',
+    lineHeight: 1.4,
+  }
+}
+
+/** 简洁版摘要，给"大致成本" KPI 的 sub。多个不同目标时列出前 2 个并省略号。 */
+function costSubLine(matches: readonly PriceMatch[]): string {
+  if (matches.length === 0) return '按价目表 / 标记估算'
+  const set = new Set(matches.map((m) => m.matched))
+  const arr = [...set]
+  if (arr.length === 1) return `按 ${arr[0]} 价`
+  if (arr.length === 2) return `按 ${arr[0]} / ${arr[1]} 价`
+  return `按 ${arr[0]} 等 ${arr.length} 种价`
+}
+
+// ---- 价格计算法区块 ----
+
+type PerIdTokens = {
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheCreation: number
+}
+
+type FormulaBucket = {
+  matched: string
+  rule: PriceMatch['rule']
+  price: ModelPrice
+  /** 该 bucket 内所有 model_id 累加的 token */
+  inTok: number
+  outTok: number
+  reasonTok: number
+  cacheRTok: number
+  cacheWTok: number
+  /** 算出来的成本 (¥) */
+  cost: number
+}
+
+function PriceFormulaSection({
+  ids,
+  matches,
+  perIdTokens,
+  totalCost,
+}: {
+  ids: readonly string[]
+  matches: readonly PriceMatch[]
+  perIdTokens: ReadonlyMap<string, PerIdTokens>
+  totalCost: number
+}) {
+  // 跟 PriceMatchTable 用同样的合并 key：同一 (matched, rule) 行的 token 累加后共享一个公式
+  const buckets = useMemo<FormulaBucket[]>(() => {
+    const out = new Map<string, FormulaBucket>()
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i] ?? ''
+      const m = matches[i]
+      if (!id || !m) continue
+      const t = perIdTokens.get(id) ?? {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+      }
+      const key = `${m.matched}\u0000${m.rule}`
+      const b = out.get(key)
+      if (b) {
+        b.inTok += t.input
+        b.outTok += t.output
+        b.reasonTok += t.reasoning
+        b.cacheRTok += t.cacheRead
+        b.cacheWTok += t.cacheCreation
+      } else {
+        out.set(key, {
+          matched: m.matched,
+          rule: m.rule,
+          price: m.price,
+          inTok: t.input,
+          outTok: t.output,
+          reasonTok: t.reasoning,
+          cacheRTok: t.cacheRead,
+          cacheWTok: t.cacheCreation,
+          cost: 0,
+        })
+      }
+    }
+    for (const b of out.values()) {
+      const inB = (b.inTok + b.cacheWTok) / 1_000_000
+      const outB = (b.outTok + b.reasonTok) / 1_000_000
+      const cacheB = b.cacheRTok / 1_000_000
+      b.cost = inB * b.price.input + outB * b.price.output + cacheB * b.price.cacheInput
+    }
+    return [...out.values()]
+  }, [ids, matches, perIdTokens])
+
+  const computedTotal = buckets.reduce((s, b) => s + b.cost, 0)
+  // 总成本做浮点对账（允许 ±0.01 ¥ 误差）
+  const drift = Math.abs(computedTotal - totalCost)
+  const driftNote =
+    drift > 0.01 && drift / Math.max(totalCost, 0.01) > 0.001
+      ? `（与上方"大致成本" ¥${totalCost.toFixed(2)} 相差 ¥${drift.toFixed(2)}，可能是浮点累积）`
+      : ''
+
+  return (
+    <div style={{ fontSize: 12, color: '#1c1c1e' }}>
+      <div
+        style={{
+          padding: '8px 10px',
+          background: '#f7f7f9',
+          border: '1px solid #ececef',
+          borderRadius: 6,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontSize: 12,
+          lineHeight: 1.6,
+        }}
+      >
+        <div style={{ marginBottom: 4, color: '#6a6a6f' }}>
+          计价公式（单位：<b>token 用 M</b> = 百万；<b>价格 = ¥ / 1M token</b>；
+          缓存写按"输入价"计，reasoning 并入"输出价"）：
+        </div>
+        <div class="mono">
+          ¥ = (输入 + 缓存写) × 输入价 + (输出 + reasoning) × 输出价 + 缓存读 × 缓存价
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        {buckets.map((b) => {
+          const isDefault = b.rule === 'default'
+          return (
+            <div
+              key={`${b.matched}\u0000${b.rule}`}
+              style={{
+                padding: '8px 10px',
+                marginBottom: 8,
+                background: isDefault ? '#fff5f5' : '#fafafc',
+                border: `1px solid ${isDefault ? '#f3c2c2' : '#ececef'}`,
+                borderRadius: 6,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginBottom: 4,
+                  fontSize: 11,
+                  color: '#6a6a6f',
+                }}
+              >
+                <span>按</span>
+                <span class="mono" style={{ color: '#1c1c1e', fontWeight: 600 }}>
+                  {b.matched}
+                </span>
+                <span style={ruleTag(b.rule)}>{RULE_LABEL[b.rule]}</span>
+                {isDefault && (
+                  <span style={{ marginLeft: 4, color: '#a23b3b' }}>
+                    ← 兜底价；该组实际成本很可能偏低
+                  </span>
+                )}
+              </div>
+              <div
+                class="mono"
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.7,
+                  wordBreak: 'break-all',
+                  color: isDefault ? '#7a2a2a' : '#1c1c1e',
+                }}
+              >
+                ({fmtTok(b.inTok)} + {fmtTok(b.cacheWTok)}) × ¥{b.price.input.toFixed(2)}
+                {' + '}
+                ({fmtTok(b.outTok)} + {fmtTok(b.reasonTok)}) × ¥{b.price.output.toFixed(2)}
+                {' + '}
+                {fmtTok(b.cacheRTok)} × ¥{b.price.cacheInput.toFixed(2)}
+                {' = '}
+                <span style={{ fontWeight: 600 }}>¥{b.cost.toFixed(2)}</span>
+              </div>
+              <div style={{ fontSize: 10, color: '#8a8a90', marginTop: 2 }}>
+                各 token 数已除以 1M（与 ¥/M 配对相乘），下面给一档手算示例：
+                {' '}
+                <span class="mono">
+                  {fmtTok(b.inTok + b.cacheWTok)}M × ¥{b.price.input.toFixed(2)}/M
+                  {' = '}
+                  ¥{((b.inTok + b.cacheWTok) / 1_000_000 * b.price.input).toFixed(2)}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div
+        style={{
+          marginTop: 4,
+          padding: '6px 10px',
+          background: '#1f6ec7',
+          color: '#fff',
+          borderRadius: 6,
+          fontSize: 13,
+        }}
+      >
+        <span style={{ marginRight: 8 }}>本组合计：</span>
+        <span class="mono" style={{ fontWeight: 700 }}>¥{computedTotal.toFixed(2)}</span>
+        {driftNote && (
+          <span style={{ marginLeft: 8, fontSize: 10, opacity: 0.85 }}>{driftNote}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** token 整数用 1.2K / 3.4M 缩写；< 1000 留整数 */
+function fmtTok(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return '0'
+  if (n < 1000) return String(Math.round(n))
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}K`
+  return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0)}M`
 }

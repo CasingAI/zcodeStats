@@ -68,11 +68,22 @@ export function ByModelPage({ db }: { db: OpenedDb }) {
             "已标记"=用户手动指定计价模型；"已识别"=自动命中价目表；"未识别"=按 v4-pro 默认价估算成本，仅供量级参考。
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
+            minWidth: 0,
+            flex: '0 1 auto',
+          }}
+        >
           <SegmentedControl<Range>
             value={range}
             onChange={setRange}
             ariaLabel="时间范围"
+            className="section__control"
             items={[
               { id: '7d', label: '近7天' },
               { id: '30d', label: '近30天' },
@@ -83,6 +94,7 @@ export function ByModelPage({ db }: { db: OpenedDb }) {
             value={mode}
             onChange={setMode}
             ariaLabel="聚合方式"
+            className="section__control"
             items={[
               { id: 'id', label: '按ID' },
               { id: 'name', label: '按名字聚合' },
