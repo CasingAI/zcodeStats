@@ -16,6 +16,7 @@ export const ROUTES: readonly Route[] = [
   { path: 'by-tool', title: '按工具', showInNav: true },
   { path: 'errors', title: '错误与重试', showInNav: true },
   { path: 'sql', title: 'SQL 控制台', showInNav: true },
+  { path: 'about', title: '关于', showInNav: true },
   // 参数路由：#/model/<encoded 分组名>，不在侧边栏出现
   { path: 'model', title: '模型详情' },
 ] as const

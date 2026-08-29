@@ -12,6 +12,7 @@ import { ByHourPage } from './pages/by-hour.tsx'
 import { ByToolPage } from './pages/by-tool.tsx'
 import { ErrorsPage } from './pages/errors.tsx'
 import { SqlConsolePage } from './pages/sql-console.tsx'
+import { AboutPage } from './pages/about.tsx'
 import { EmptyState } from './ui/empty-state.tsx'
 
 export function App() {
@@ -220,6 +221,10 @@ function PageHost({
   param: string
   state: ReturnType<typeof useDb>['state']
 }) {
+  // 「关于」不需要数据库,任何状态下都能进
+  if (route === 'about') {
+    return <AboutPage />
+  }
   if (state.kind !== 'ready') {
     return <IdleView state={state} />
   }
@@ -242,6 +247,8 @@ function PageHost({
       return <ErrorsPage db={state.db} />
     case 'sql':
       return <SqlConsolePage db={state.db} />
+    case 'about':
+      return <AboutPage />
     default:
       return null
   }
