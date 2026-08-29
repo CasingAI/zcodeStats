@@ -1,12 +1,19 @@
-# Cloudflare Pages 项目配置（官方 "Pages-as-code"）。
-# `pages_build_output_dir` 的存在即声明这是一个 Pages 项目而非 Worker：
-# - Cloudflare 面板 / CI 据此识别构建产物目录为 dist/
-# - `npx wrangler pages deploy` 不带参数即可部署（项目名、产物目录全部自动读取）
-# - `wrangler deploy`（Worker 命令）会直接报错拒绝，防止再被误部署成 Worker
+# Cloudflare Workers 静态资产（Workers Assets）配置。
+# 站点 = 一个（空脚本）Worker + ./dist 静态资产，取代 Pages：
+# - `npx wrangler deploy` 一条命令部署（自动带 *.workers.dev 子域）
+# - 自定义域名走 Worker Custom Domains：zone 在同一账号时会【自动创建 DNS 记录】，
+#   无需手动验证——这是它相对 Pages 自定义域名的关键差异
 name = "zcodestats"
-pages_build_output_dir = "dist"
-
-# 纯静态站、无 Functions，此日期不影响任何运行时行为，只在本地 `pages dev`
-# 启动 workerd 时被校验。2026-08-08 是本机 wrangler 4.120 自带 workerd 支持的
-# 上限（再新会被拒启动）；将来升级 wrangler 后可随手更新此日期。
+main = "worker/index.js"
+# 纯静态、无运行时特性依赖；钉死是为了让旧版本地 workerd 也能 `wrangler dev`
 compatibility_date = "2026-08-08"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+# 自动绑定自定义域名（可选）：取消注释、改成你的域名后重新 deploy，
+# Cloudflare 会在 zone 里自动建 DNS 记录，无需去面板手动验证：
+# routes = [
+#   { pattern = "stats.casing-ai.com", custom_domain = true }
+# ]

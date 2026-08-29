@@ -42,14 +42,21 @@ pnpm build         # 输出到 dist/
 pnpm preview       # 预览 dist/
 ```
 
-## 部署（Cloudflare Pages）
+## 部署（Cloudflare Workers 静态资产）
 
-配置即代码：根目录 `wrangler.toml` 声明 `pages_build_output_dir = "dist"`，
-任何部署方式都会被 Cloudflare 识别为 Pages 项目（不会被当成 Worker）。
+`wrangler.toml` 把 `./dist` 声明为 Worker 静态资产（Workers Assets）：
+站点就是一个「空脚本 Worker + 静态资产」，自定义域名走 Worker Custom Domains——
+zone 在同一账号时会自动创建 DNS 记录，无需手动验证（相对 Pages 的关键差异）。
 
-- **本地部署**：`npx wrangler pages deploy`（自动读取 wrangler.toml 里的项目名 `zcodestats` 和产物目录 `dist`）
-- **Git 集成**：面板里 Connect to Git 选本仓库，构建命令 `pnpm build`（或 `npm run build`），输出目录 `dist`
-- 纯 hash 路由 SPA，无需 `_redirects`；WASM/MIME 由 Pages 自动处理，无需 `_headers`
+```bash
+pnpm build
+npx wrangler deploy    # 部署 Worker（自动带 *.workers.dev 子域）
+```
+
+- **绑定自定义域名**：取消 `wrangler.toml` 里 `routes` 的注释并填入域名后重新 deploy；
+  或在面板 Workers & Pages → zcodestats → Settings → Domains & Routes 添加（同样自动建 DNS）
+- **push 自动部署**：面板里给该 Worker 开 Workers Builds（连接本仓库，构建命令 `pnpm build`）
+- 纯 hash 路由 SPA，无需 `_redirects`；WASM/MIME 由 Workers Assets 自动处理
 
 ## 文件结构
 
