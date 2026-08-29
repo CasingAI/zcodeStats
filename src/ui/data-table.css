@@ -95,6 +95,32 @@
   font-weight: 700;
 }
 
+/* 首列冻结：横向滚动时 "模型分组" 这一列保持可见，列头跟行单元都 sticky。
+   z-index 分层：header 单元格在最上（盖住行），行单元格在中间（盖住 body 内容）。 */
+.data-table__cell--sticky-left {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #fff;
+  /* 用 box-shadow 在右侧画一条分隔线，避开 sticky + 1px border 在
+     横向滚动时的渲染抖动 */
+  box-shadow: 1px 0 0 #ececef;
+}
+
+.data-table__header > .data-table__cell--sticky-left {
+  /* header 自带渐变背景，这里覆盖成 header 同色 */
+  background: linear-gradient(180deg, #f6f6f8 0%, #e8e8ec 100%);
+  z-index: 2; /* header sticky 要盖过 body sticky */
+}
+
+/* 行 hover 时把 sticky 单元的背景也一起换色 */
+.data-table__row:hover > .data-table__cell--sticky-left {
+  background: #f6f8fc;
+}
+.data-table__row--clickable:hover > .data-table__cell--sticky-left {
+  background: #eaf2fd;
+}
+
 .data-table__empty,
 .data-table__loading {
   padding: 32px 16px;

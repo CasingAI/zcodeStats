@@ -72,10 +72,13 @@ export function DataTable<Row>({
   return (
     <div class={wrapClass} role="table" aria-rowcount={rows.length + 1}>
       <div class="data-table__header" role="row" style={headerStyle}>
-        {columns.map((c) => (
+        {columns.map((c, ci) => (
           <div
             key={c.key}
-            class="data-table__cell data-table__cell--head"
+            class={
+              'data-table__cell data-table__cell--head' +
+              (ci === 0 ? ' data-table__cell--sticky-left' : '')
+            }
             role="columnheader"
             data-align={c.align ?? 'left'}
           >
@@ -92,10 +95,13 @@ export function DataTable<Row>({
             style={rowStyle}
             onClick={onRowClick ? () => onRowClick(row, i) : undefined}
           >
-            {columns.map((c) => (
+            {columns.map((c, ci) => (
               <div
                 key={c.key}
-                class="data-table__cell"
+                class={
+                  'data-table__cell' +
+                  (ci === 0 ? ' data-table__cell--sticky-left' : '')
+                }
                 role="cell"
                 data-align={c.align ?? 'left'}
               >
