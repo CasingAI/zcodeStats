@@ -8,7 +8,16 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
     0 1px 1px rgba(0, 0, 0, 0.04);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.data-table__header,
+.data-table__row {
+  /* 防止 grid 列在窄容器下被 minmax(0, 1fr) 强行压到 0，
+     让所有列真实宽度相加，超出容器时由 .data-table 出横向滚动条。 */
+  width: max-content;
+  min-width: 100%;
 }
 
 .data-table__header {

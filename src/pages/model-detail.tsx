@@ -642,10 +642,10 @@ function PriceFormulaSection({
                 <span style={{ fontWeight: 600 }}>¥{b.cost.toFixed(2)}</span>
               </div>
               <div style={{ fontSize: 10, color: '#8a8a90', marginTop: 2 }}>
-                各 token 数已除以 1M（与 ¥/M 配对相乘），下面给一档手算示例：
+                下面给"输入档"一档手算示例（token 单位自动匹配 token 数量级）：
                 {' '}
                 <span class="mono">
-                  {fmtTok(b.inTok + b.cacheWTok)}M × ¥{b.price.input.toFixed(2)}/M
+                  {fmtTokWithUnit(b.inTok + b.cacheWTok)} × {pricePerYi(b.price.input)}
                   {' = '}
                   ¥{((b.inTok + b.cacheWTok) / 1_000_000 * b.price.input).toFixed(2)}
                 </span>
@@ -675,10 +675,43 @@ function PriceFormulaSection({
   )
 }
 
-/** token 整数用 1.2K / 3.4M 缩写；< 1000 留整数 */
+/**
+ * token 整数缩写：
+ *   < 1000       → 整数（无单位）
+ *   < 1M         → 1.2K / 12K
+ *   < 100M       → 12.3M / 123.4M（自动选 1-2 位小数）
+ *   ≥ 100M       → 1.23亿（2 位小数；M 单位三位数切到"亿"避免出现 12345M）
+ */
 function fmtTok(n: number): string {
   if (!Number.isFinite(n) || n === 0) return '0'
   if (n < 1000) return String(Math.round(n))
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}K`
-  return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0)}M`
+  if (n < 100_000_000) {
+    const m = n / 1_000_000
+    return `${m.toFixed(m < 10 ? 2 : m < 100 ? 1 : 0)}M`
+  }
+  // n ≥ 1 亿
+  const yi = n / 100_000_000
+  return `${yi.toFixed(2)}亿`
+}
+
+/**
+ * 给"手算示例"用：token + 自带单位，配 pricePerYi() 出来的价格单位。
+ *   < 1M    → 12.3K
+ *   < 100M → 12.3M
+ *   ≥ 100M → 1.23亿
+ */
+function fmtTokWithUnit(n: number): string {
+  return fmtTok(n)
+}
+
+/**
+ * 价格按"亿"自动配对：
+ *   ¥3.00/M → ¥300/亿
+ *   ¥9.00/M → ¥900/亿
+ * 让手算示例 "X亿 × ¥Y/亿 = ¥Z" 数字配对、单位一致。
+ */
+function pricePerYi(perM: number): string {
+  const perYi = perM * 100
+  return `¥${perYi.toFixed(2)}/亿`
 }
