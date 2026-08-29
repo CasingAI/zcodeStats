@@ -5,8 +5,8 @@
 
 ## 用法
 
-1. **先退出 ZCode**（⌘Q）。ZCode 运行中会把数据写在 `db.sqlite-wal` 里，WAL 模式下的库不能只读打开。
-   - 如果忘了退，应用会在报错横幅里提示，先关 ZCode 再点"打开文件"。
+1. **通常 ZCode 运行中也能打开**（数据库以 `immutable=1` 只读打开，跳过锁与 WAL 恢复）。如果想读到 WAL 里尚未 checkpoint 的最新数据，建议先 ⌘Q 退出 ZCode 再打开。
+   - 部分情况下打开会报错，应用会在横幅里提示原因和处理方式。
 2. 启动：开发模式 `npm run dev`，或先 `npm run build` 然后用浏览器打开 `dist/index.html`。
 3. 两种入口任选：
    - **直接拖放** — 从 Finder 拖 `db.sqlite` 到页面任意位置即可（**推荐**）。已开着库时再拖会弹确认再替换。
@@ -28,7 +28,7 @@
 
 ## 已知限制
 
-- **WAL 模式**：数据库以 `immutable=1` 只读打开——跳过锁、WAL 恢复与 shm，因此 ZCode 正在运行时也能打开，但只读主库文件，**WAL 里未 checkpoint 的最新数据会被忽略（可能略旧）**。要读到最新数据，先 `⌘Q` 退出 ZCode 再打开。
+- **WAL 模式**：数据库以 `immutable=1` 只读打开——跳过锁、WAL 恢复与 shm，因此 ZCode 正在运行时**通常**也能打开，但只读主库文件，WAL 里未 checkpoint 的最新数据**可能**读不到（取决于版本和当时的 WAL 状态）。要读到最新数据，建议先 `⌘Q` 退出 ZCode 再打开。
 - **FileReaderSync 是 Worker 专属**，Firefox / Safari 走主线程就拿不到。Firefox 应该也支持 Worker FileReaderSync（[MDN](https://developer.mozilla.org/en-US/docs/Web/API/FileReaderSync) 标 baseline widely available），但旧版可能不行。
 - **`showOpenFilePicker` 仅 Chromium 系**（Chrome 86+ / Edge 86+）。Safari / Firefox 会自动 fallback 到 `<input type=file>`，UX 一样。
 - 自定义 VFS 已在真实数据快照上端到端验证（open + schema + 聚合查询）。若仍遇到报错，**issue 报一下原始错误**。
@@ -86,7 +86,7 @@ src/
 - **价格缓存按 dbKey 隔离**：close + open 不同 db 不会拿旧价（`pricing.clearPriceCache('*')` 全清）。
 - **标记全局生效**：`zcode-stats.model-marks` + `zcode-stats.custom-models` 改一次，所有 useMarks() 订阅的页面 + 价格缓存（pricing 内部 clearPriceCache('*')）同步重算。跨 tab 同步通过 `storage` 事件。
 - **内置等价映射**（`pricing.ts` BUILTIN_ALIASES_LC）：如 `openrouter/sonoma/stealth/ox-alpha` → `GLM-5.3-Flash`，大小写不敏感。后续遇到更多直接往表里加。
-- **WAL**：只读 + immutable=1 打开；ZCode 运行中能开但只读到主库文件，看不到 WAL 未 checkpoint 的最新数据。要最新数据先 `⌘Q` 退出 ZCode。
+- **WAL**：只读 + immutable=1 打开；ZCode 运行中通常能开，但只读到主库文件，WAL 未 checkpoint 的最新数据**可能**看不到。要最新数据建议先 `⌘Q` 退出 ZCode。
 
 ## License
 

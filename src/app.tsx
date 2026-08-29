@@ -82,7 +82,7 @@ export function App() {
         <div class="app-topbar__title">ZCode 用量分析</div>
         {state.kind === 'ready' && (
           <div class="app-topbar__file" title={state.db.file.name}>
-            📄 {state.db.file.name} · {formatFileSize(state.db.size)}
+            {state.db.file.name} · {formatFileSize(state.db.size)}
           </div>
         )}
         <div class="app-topbar__spacer" />
@@ -184,9 +184,9 @@ export function App() {
               <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: 12, lineHeight: 1.6 }}>
                 <li>macOS 系统选择器默认不显示隐藏目录，按 <strong>⌘Shift+.</strong> 切换显示。</li>
                 <li><strong>建议：</strong>直接在 Finder 选中文件，<strong>拖进浏览器窗口</strong> — 最稳。</li>
-                <li>若 ZCode 正在运行，WAL 还在写：先 ⌘Q 退出 ZCode，或在终端跑
+                <li>若 ZCode 正在运行，WAL 可能还在写：建议先 ⌘Q 退出 ZCode，或在终端跑
                   <code style={{ fontSize: 11 }}> sqlite3 ~/.zcode/cli/db/db.sqlite .quit </code>
-                  触发 checkpoint。</li>
+                  触发 checkpoint（部分版本即使在 ZCode 运行中也能读到，取决于 WAL 状态）。</li>
               </ul>
             </div>
             <div class="app-modal__actions">
@@ -260,7 +260,7 @@ function IdleView({ state }: { state: ReturnType<typeof useDb>['state'] }) {
             <div style={{ marginTop: '8px' }}>
               <strong>常见原因：</strong>
               <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
-                <li>ZCode 还在运行中（占用 WAL 文件）— 请先 ⌘Q 退出 ZCode，或在终端跑 <code>sqlite3 ~/.zcode/cli/db/db.sqlite .quit</code> 触发 checkpoint。</li>
+                <li>ZCode 还在运行中（WAL 可能被占用）— 建议先 ⌘Q 退出 ZCode，或在终端跑 <code>sqlite3 ~/.zcode/cli/db/db.sqlite .quit</code> 触发 checkpoint；部分版本可直接读到。</li>
                 <li>选了非 SQLite 文件 — 请确认选的是 ZCode 的 <code>~/.zcode/cli/db/db.sqlite</code>。</li>
                 <li>浏览器版本太老（需要 Chrome 86+ / Edge 86+ / Firefox 111+ / Safari 16.4+）。</li>
               </ul>
@@ -278,7 +278,7 @@ function IdleView({ state }: { state: ReturnType<typeof useDb>['state'] }) {
 1) 直接从 Finder / 资源管理器拖 db.sqlite 进来 — 最稳；
 2) 点右上角 "打开 db.sqlite"，按提示找到隐藏目录 ~/.zcode/cli/db/（macOS 选目录时按 ⌘Shift+.）。
 
-建议先 ⌘Q 退出 ZCode，让 WAL 文件合并进主 db，否则 VFS 读不到最新数据。`}
+ZCode 运行中通常也能打开（immutable=1 跳过锁），但 WAL 里未 checkpoint 的最新数据可能读不到 — 想要最新数据建议先 ⌘Q 退出 ZCode。`}
       />
     </div>
   )
