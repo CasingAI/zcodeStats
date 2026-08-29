@@ -1,0 +1,9 @@
+name = "zcodestats"
+account_id = "23ec159df1a5831b2b2d48ec1a7073d4"
+compatibility_date = "2026-08-29"
+
+# Cloudflare Pages: static output directory from vite build
+pages_build_output_dir = "dist"
+
+[build]
+command = "pnpm run build"
