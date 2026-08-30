@@ -426,3 +426,52 @@ code {
   height: 10px;
   border-radius: 50%;
 }
+
+/* ---- uPlot 悬浮数值卡片 ---- */
+.uplot-tooltip {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  min-width: 120px;
+  max-width: 260px;
+  padding: 7px 10px;
+  background: rgba(252, 252, 254, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-size: 11px;
+  line-height: 1.5;
+  color: #1c1c1e;
+}
+
+.uplot-tooltip__title {
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: #3a3a3c;
+}
+
+.uplot-tooltip__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.uplot-tooltip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.uplot-tooltip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.uplot-tooltip__value {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}

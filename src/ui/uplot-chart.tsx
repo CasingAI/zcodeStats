@@ -56,6 +56,73 @@ export function UPlotChart({
     const host = hostRef.current
     if (!host) return
 
+    // tooltip DOM 提前创建：setCursor hook 闭包会引用
+    const tip = document.createElement('div')
+    tip.className = 'uplot-tooltip'
+    tip.style.display = 'none'
+
+    /** 悬浮数值卡片：显示当前 x 与各可见系列的值，跟随光标并做边缘翻转 */
+    const updateTooltip = (u: uPlot) => {
+      const idx = u.cursor.idx
+      const left = u.cursor.left
+      const top = u.cursor.top
+      if (idx == null || left == null || top == null) {
+        tip.style.display = 'none'
+        return
+      }
+
+      while (tip.firstChild) tip.removeChild(tip.firstChild)
+      const xVal = (u.data[0] as (number | undefined)[] | undefined)?.[idx]
+      if (xFormat && xVal != null) {
+        const head = document.createElement('div')
+        head.className = 'uplot-tooltip__title'
+        head.textContent = xFormat(xVal)
+        tip.appendChild(head)
+      }
+
+      for (let s = 1; s < u.series.length; s++) {
+        const series = u.series[s]
+        if (series == null || !series.show) continue
+        const v = (u.data[s] as (number | null | undefined)[] | undefined)?.[idx]
+        if (v == null) continue
+        const def = seriesDefs[s - 1]
+
+        const row = document.createElement('div')
+        row.className = 'uplot-tooltip__row'
+
+        const dot = document.createElement('span')
+        dot.className = 'uplot-tooltip__dot'
+        dot.style.background = typeof series.stroke === 'string' ? series.stroke : '#1c1c1e'
+        row.appendChild(dot)
+
+        const label = document.createElement('span')
+        label.className = 'uplot-tooltip__label'
+        label.textContent = typeof series.label === 'string' ? series.label : ''
+        row.appendChild(label)
+
+        const val = document.createElement('span')
+        val.className = 'uplot-tooltip__value'
+        val.textContent = def?.value ? def.value(u, u, v) : yFormat ? yFormat(v) : String(v)
+        row.appendChild(val)
+
+        tip.appendChild(row)
+      }
+      if (!tip.firstChild) {
+        tip.style.display = 'none'
+        return
+      }
+
+      tip.style.display = 'block'
+      // 定位在光标右侧 14px，靠近右/上边缘时翻转
+      const overW = u.over.clientWidth
+      const overH = u.over.clientHeight
+      const flipX = left + 14 + tip.offsetWidth > overW
+      const x = flipX ? left - tip.offsetWidth - 14 : left + 14
+      const y = Math.min(Math.max(top - tip.offsetHeight / 2, 4), Math.max(overH - tip.offsetHeight - 4, 4))
+      tip.style.left = `${Math.round(x)}px`
+      tip.style.top = `${Math.round(y)}px`
+    }
+
     const opts: Options = {
       width: host.clientWidth || 600,
       height,
@@ -108,9 +175,15 @@ export function UPlotChart({
         drag: { x: false, y: false },
         points: { size: 5 },
       },
+      hooks: {
+        // 悬浮数值卡片：跟随光标，显示当前 x + 各系列值
+        setCursor: [updateTooltip],
+      },
     }
 
     const chart = new uPlot(opts, data as AlignedData, host)
+    // tooltip 挂在 .u-over 上（与 canvas 同尺寸、覆盖其上的定位层）
+    chart.over.appendChild(tip)
     chartRef.current = chart
 
     const ro = new ResizeObserver(() => {
