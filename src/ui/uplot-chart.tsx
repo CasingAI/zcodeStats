@@ -84,15 +84,20 @@ export function UPlotChart({
         const series = u.series[s]
         if (series == null || !series.show) continue
         const v = (u.data[s] as (number | null | undefined)[] | undefined)?.[idx]
-        if (v == null) continue
+        if (v == null || v === 0) continue
         const def = seriesDefs[s - 1]
 
         const row = document.createElement('div')
         row.className = 'uplot-tooltip__row'
 
+        // 圆点颜色用 seriesDefs 源数据：uPlot 内部会改写 series.stroke，
+        // 直接读 series.stroke 在多线按模型场景会取到 undefined 显示同色
+        const rawStroke = def?.stroke
+        const dotColor = typeof rawStroke === 'string' ? rawStroke : '#1c1c1e'
+
         const dot = document.createElement('span')
         dot.className = 'uplot-tooltip__dot'
-        dot.style.background = typeof series.stroke === 'string' ? series.stroke : '#1c1c1e'
+        dot.style.background = dotColor
         row.appendChild(dot)
 
         const label = document.createElement('span')
@@ -107,7 +112,8 @@ export function UPlotChart({
 
         tip.appendChild(row)
       }
-      if (!tip.firstChild) {
+      // 只有标题但没有任何数据行时也隐藏（避免日期下空空）
+      if (tip.childElementCount === 0 || (tip.childElementCount === 1 && tip.firstElementChild?.classList.contains('uplot-tooltip__title'))) {
         tip.style.display = 'none'
         return
       }
