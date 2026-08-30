@@ -407,3 +407,22 @@ code {
   width: 180px;
   flex-shrink: 0;
 }
+
+/* ---- 按模型分线趋势图：图例移到图上方，圆点 marker ---- */
+.uplot-legend-top {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.uplot-legend-top .u-legend {
+  order: -1;
+  margin: 0 auto 2px;
+  font-size: 12px;
+}
+
+.uplot-legend-top .u-legend .u-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}

@@ -372,3 +372,17 @@ export function resolveGroups(
   out.sort((a, b) => b.totalTokens - a.totalTokens)
   return out
 }
+
+// 多模型分线趋势图的循环调色板（iOS 系柔和色，与现有图表主色一致）
+export const MODEL_LINE_COLORS = [
+  '#1f6ec7', // 蓝
+  '#34c759', // 绿
+  '#8e6cc7', // 紫
+  '#e07a3a', // 橙
+  '#e04545', // 红
+  '#30b0c7', // 青
+  '#5e5ce6', // 靛
+  '#e0669e', // 粉
+  '#a2845e', // 棕
+  '#8e8e93', // 灰
+] as const
