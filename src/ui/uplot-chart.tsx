@@ -1,5 +1,5 @@
 // Thin Preact wrapper around uPlot. Handles instance lifecycle, container
-// width tracking, drag-zoom + double-click reset, and iOS 6-ish axis styling.
+// width tracking, and iOS 6-ish axis styling (无框选缩放，悬浮查看数值)。
 // Callers pass plain arrays; uPlot owns the canvas rendering.
 //
 // 重建策略：format 引用 / series 数量 / x 轴类型 / 高 任意一项变化 → 销毁并重建。
@@ -37,6 +37,9 @@ const AXIS_FONT = '10px -apple-system, BlinkMacSystemFont, sans-serif'
 const AXIS_STROKE = '#6a6a70'
 const GRID_STROKE = 'rgba(0, 0, 0, 0.07)'
 
+// 离屏 canvas：测量轴标签宽度用（模块级复用；2d 上下文在常规环境不会为 null）
+const measureCtx = document.createElement('canvas').getContext('2d')!
+
 export function UPlotChart({
   data,
   seriesDefs,
@@ -73,6 +76,14 @@ export function UPlotChart({
           grid: { stroke: GRID_STROKE },
           ticks: { stroke: GRID_STROKE },
           font: AXIS_FONT,
+          // uPlot 默认 y 轴宽度固定 50px，长标签（如 ¥1,750.00）会被裁掉；
+          // 按实际格式化文本测量宽度自适应
+          size: (_u: uPlot, values: string[] | null) => {
+            if (values == null || values.length === 0) return 40
+            measureCtx.font = AXIS_FONT
+            const w = Math.max(...values.map((v) => measureCtx.measureText(String(v)).width))
+            return Math.ceil(w + 12)
+          },
           values: yFormat
             ? (_u: uPlot, splits: number[]) => splits.map(yFormat)
             : undefined,
@@ -93,18 +104,9 @@ export function UPlotChart({
       ] as Options['series'],
       legend: { show: true, live: false },
       cursor: {
-        drag: { x: true, y: false, uni: 40 },
+        // 不做框选缩放，悬浮只显示十字线与数值点
+        drag: { x: false, y: false },
         points: { size: 5 },
-      },
-      hooks: {
-        ready: [
-          (u: uPlot) => {
-            // 双击复位缩放
-            u.over.addEventListener('dblclick', () => {
-              u.setScale('x', { min: null!, max: null! })
-            })
-          },
-        ],
       },
     }
 

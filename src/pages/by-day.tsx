@@ -71,7 +71,7 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
       <div class="section__header">
         <div>
           <h1 class="page__title">按日趋势</h1>
-          <p class="page__subtitle">悬浮查看数值，拖拽框选缩放，双击复位；图例可点击隐藏/显示单条线</p>
+          <p class="page__subtitle">悬浮查看数值；图例可点击隐藏/显示单条线</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <SegmentedControl<Dim>

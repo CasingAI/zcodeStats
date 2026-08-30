@@ -1,24 +1,11 @@
-/** 数字缩写：1234 → "1.2K", 1_500_000 → "1.5M", 4_700_000_000 → "4.7B" */
+/** 数字缩写（中文单位）：30_000 → "3.0万", 300_000_000 → "3.0亿"，万以下显示整数 */
 export function formatCount(n: number, digits = 1): string {
   if (!Number.isFinite(n)) return '—'
   if (n === 0) return '0'
   const abs = Math.abs(n)
-  if (abs < 1_000) return String(n)
-  const units = [
-    { v: 1_000_000_000, s: 'B' },
-    { v: 1_000_000, s: 'M' },
-    { v: 1_000, s: 'K' },
-  ]
-  for (const u of units) {
-    if (abs >= u.v) {
-      const v = n / u.v
-      const fixed = v.toFixed(digits)
-      // 去除无意义 0
-      const cleaned = fixed.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
-      return `${cleaned}${u.s}`
-    }
-  }
-  return String(n)
+  if (abs >= 100_000_000) return `${(n / 100_000_000).toFixed(digits)}亿`
+  if (abs >= 10_000) return `${(n / 10_000).toFixed(digits).replace(/\.0+$/, '')}万`
+  return n.toLocaleString('en-US', { maximumFractionDigits: 0 })
 }
 
 /** 完整数字 + 单位，便于精确阅读（"4,701,602,255"） */
