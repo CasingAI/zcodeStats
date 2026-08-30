@@ -80,6 +80,8 @@ export function UPlotChart({
         tip.appendChild(head)
       }
 
+      // 先收集、再按当日值降序排序，让大值出现在卡片顶部
+      const rows: HTMLDivElement[] = []
       for (let s = 1; s < u.series.length; s++) {
         const series = u.series[s]
         if (series == null || !series.show) continue
@@ -89,6 +91,8 @@ export function UPlotChart({
 
         const row = document.createElement('div')
         row.className = 'uplot-tooltip__row'
+        // 在 row 上挂原值用于排序（不影响 DOM 渲染）
+        ;(row as unknown as { __v: number }).__v = v
 
         // 圆点颜色用 seriesDefs 源数据：uPlot 内部会改写 series.stroke，
         // 直接读 series.stroke 在多线按模型场景会取到 undefined 显示同色
@@ -110,8 +114,10 @@ export function UPlotChart({
         val.textContent = def?.value ? def.value(u, u, v) : yFormat ? yFormat(v) : String(v)
         row.appendChild(val)
 
-        tip.appendChild(row)
+        rows.push(row)
       }
+      rows.sort((a, b) => (b as unknown as { __v: number }).__v - (a as unknown as { __v: number }).__v)
+      for (const row of rows) tip.appendChild(row)
       // 只有标题但没有任何数据行时也隐藏（避免日期下空空）
       if (tip.childElementCount === 0 || (tip.childElementCount === 1 && tip.firstElementChild?.classList.contains('uplot-tooltip__title'))) {
         tip.style.display = 'none'
