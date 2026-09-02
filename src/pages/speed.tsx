@@ -89,8 +89,9 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
           <h1 class="page__title">输出速度</h1>
           <p class="page__subtitle">
             各模型解码速度趋势（同一张图，悬浮查看数值；图例可点击隐藏/显示单条线，悬停可聚焦该系列）。
-            解码速度 = 输出 token ÷（总时长 − 首 token 等待），不含等首字的时间，仅统计记录了有效首字时间的调用，无样本时段断线。
-            统计口径：平均 = 按 token 加权；最大/最小 = 该时段内单次调用的极值
+            本页为<strong>净解码速度</strong>：仅统计主对话与子代理的正常生成请求（已剔除上下文压缩、标题生成等辅助请求），
+            与总览等其他页面的平均速度口径不同。解码速度 = 输出 token ÷（总时长 − 首 token 等待），不含等首字的时间，无样本时段断线。
+            统计口径：平均 = 按 token 加权；最大/最小 = 单次调用的极值，且仅统计解码窗口 ≥3s、输出 ≥32 token 的正常长度调用
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -132,7 +133,7 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
           <>
             <div class="kpi-grid kpi-grid--3" style={{ marginBottom: 12 }}>
               <KpiCard
-                label={statMode === 'avg' ? '区间解码速度' : statMode === 'max' ? '单次最快速度' : '单次最慢速度'}
+                label={statMode === 'avg' ? '净解码速度' : statMode === 'max' ? '单次最快速度' : '单次最慢速度'}
                 tone="orange"
                 value={kpis.headline == null ? '—' : formatTokensPerSecond(kpis.headline)}
                 sub={kpis.headlineSub}
@@ -400,8 +401,8 @@ function buildKpis(rows: readonly SpeedTrendRow[], marks: MarkMap, statMode: Sta
     statMode === 'min' ? minTokPerS :
     durationMs > 0 ? (outputTokens / durationMs) * 1000 : null
   const headlineSub =
-    statMode === 'max' ? '区间内单次调用的最高速度' :
-    statMode === 'min' ? '区间内单次调用的最低速度' :
+    statMode === 'max' ? '区间内单次调用的最高速度（解码 ≥3s 且输出 ≥32 token）' :
+    statMode === 'min' ? '区间内单次调用的最低速度（解码 ≥3s 且输出 ≥32 token）' :
     `${formatFull(samples)} 次有效样本`
   return {
     headline,

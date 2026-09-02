@@ -85,6 +85,23 @@ const SPEED_VALID =
   'duration_ms > 0 AND output_tokens > 0 AND time_to_first_token_ms IS NOT NULL ' +
   'AND time_to_first_token_ms >= 0 AND time_to_first_token_ms < duration_ms'
 
+/**
+ * 速度页专用样本口径：在 SPEED_VALID 之上仅保留正常生成请求。
+ * query_source 白名单实测：极值失真（解码窗口 9~36ms 上万 tok/s）全部来自
+ * main_turn / subagent 的短窗口调用；compact / session_title 等辅助请求
+ * 虽非失真来源，但它们不是「生成」行为，同样不计入速度页。
+ */
+const SPEED_SAMPLE =
+  `(${SPEED_VALID}) AND query_source IN ('main_turn', 'subagent')`
+
+/**
+ * 速度页极值（最大/最小）口径：在 SPEED_SAMPLE 之上要求解码窗口 ≥3s
+ * 且输出 ≥32 token，剔除短窗口计时噪声（假快）与流中途卡顿（假慢）。
+ * 实测近 7 天 max 19,631 → 429 tok/s；仅用于 speedTrend 的 MAX/MIN 两列。
+ */
+const SPEED_EXTREME =
+  `(${SPEED_SAMPLE}) AND duration_ms - time_to_first_token_ms >= 3000 AND output_tokens >= 32`
+
 export const QUERIES = {
   overview(range: Range): ParamQuery {
     const tzOffsetMs = timezoneOffsetMs()
@@ -318,9 +335,10 @@ export const QUERIES = {
   },
 
   /**
-   * 速度趋势：按「本地小时桶 × model_id」聚合速度样本（纯解码口径，见 SPEED_VALID）。
+   * 速度趋势：按「本地小时桶 × model_id」聚合速度样本（见 SPEED_SAMPLE/SPEED_EXTREME）。
    * 日/周粒度由页面在前端折叠小时桶得到，一条查询服务三种粒度。
-   * speedMax/speedMin 是桶内单次调用速度的极值（平均/最大/最小三种统计口径用）。
+   * 速度三列用 SPEED_SAMPLE（仅正常生成请求）；speedMax/speedMin 是桶内单次
+   * 调用速度的极值，用 SPEED_EXTREME（解码 ≥3s 且输出 ≥32 token）。
    * ttftSumMs/ttftSampleCount 给页面的「平均首字等待」KPI 用。
    */
   speedTrend(range: Range): ParamQuery {
@@ -329,13 +347,13 @@ export const QUERIES = {
       SELECT
         strftime('%Y-%m-%dT%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS bucket,
         model_id                                            AS modelId,
-        SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
-        SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN ${SPEED_SAMPLE} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN ${SPEED_SAMPLE} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN ${SPEED_SAMPLE} THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount,
-        MAX(CASE WHEN ${SPEED_VALID} THEN output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) END) AS speedMaxTokPerS,
-        MIN(CASE WHEN ${SPEED_VALID} THEN output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) END) AS speedMinTokPerS
+        MAX(CASE WHEN ${SPEED_EXTREME} THEN output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) END) AS speedMaxTokPerS,
+        MIN(CASE WHEN ${SPEED_EXTREME} THEN output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) END) AS speedMinTokPerS
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)}
       GROUP BY bucket, model_id

@@ -133,7 +133,8 @@ export type ByDayByModelRow = TimingAggregates & {
 }
 
 /** 速度趋势页的「本地小时桶 × model_id」行；页面按 日/周 粒度在前端再折叠。
- *  速度字段为纯解码口径（见 queries.ts SPEED_VALID） */
+ *  速度字段仅统计正常生成请求（query_source 白名单，见 queries.ts SPEED_SAMPLE）；
+ *  极值字段另要求解码窗口 ≥3s 且输出 ≥32 token（SPEED_EXTREME） */
 export type SpeedTrendRow = {
   /** 本地时区小时桶，格式 'YYYY-MM-DDTHH' */
   bucket: string
@@ -143,7 +144,7 @@ export type SpeedTrendRow = {
   speedSampleCount: number
   ttftSumMs: number
   ttftSampleCount: number
-  /** 桶内单次调用解码速度的最大/最小值（tok/s，同 SPEED_VALID 口径）；无有效样本为 null */
+  /** 桶内单次调用解码速度的最大/最小值（tok/s，SPEED_EXTREME 口径）；无合格样本为 null */
   speedMaxTokPerS: number | null
   speedMinTokPerS: number | null
 }
