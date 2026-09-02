@@ -20,11 +20,14 @@ import type {
   ByDayRow,
   ByHourGrid,
   ByModelRow,
+  ByProviderModelRow,
+  ByProviderRow,
   BySessionRow,
   ByToolRow,
   ErrorsOverview,
   OverviewKpis,
   SqlExecResult,
+  TimingAggregates,
 } from './types.ts'
 import { costFor, type UsageForCost } from '../lib/pricing.ts'
 
@@ -79,7 +82,13 @@ export const QUERIES = {
         COALESCE(SUM(retry_count), 0)                                            AS retryTotal,
         MIN(started_at)                                                          AS firstSeen,
         MAX(started_at)                                                          AS lastSeen,
-        COUNT(DISTINCT strftime('%Y-%m-%d', started_at/1000, 'unixepoch'))       AS activeDays
+        COUNT(DISTINCT strftime('%Y-%m-%d', started_at/1000, 'unixepoch'))       AS activeDays,
+        SUM(CASE WHEN status='completed' AND duration_ms > 0 THEN duration_ms ELSE 0 END)            AS totalDurationMs,
+        SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END)    AS speedDurationMs,
+        SUM(CASE WHEN status='completed' AND time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN status='completed' AND time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END)  AS ttftSampleCount
       FROM model_usage
       WHERE 1=1 ${rangeClause(range)}
     `
@@ -121,7 +130,13 @@ export const QUERIES = {
           SUM(reasoning_tokens) AS reasoningTokens,
           SUM(cache_read_input_tokens) AS cacheReadTokens,
           SUM(cache_creation_input_tokens) AS cacheCreationTokens,
-          SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount
+          SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
+          SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+          SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+          SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
         FROM model_usage
         WHERE status='completed' ${rangeClause(range)}
         GROUP BY model_id, provider_id
@@ -143,7 +158,13 @@ export const QUERIES = {
              ELSE 0 END          AS cacheHitRate,
         CASE WHEN total.s > 0
              THEN CAST(agg.totalTokens AS REAL) / total.s
-             ELSE 0 END          AS share
+             ELSE 0 END          AS share,
+        agg.totalDurationMs       AS totalDurationMs,
+        agg.speedSampleCount      AS speedSampleCount,
+        agg.speedOutputTokens     AS speedOutputTokens,
+        agg.speedDurationMs       AS speedDurationMs,
+        agg.ttftSumMs             AS ttftSumMs,
+        agg.ttftSampleCount       AS ttftSampleCount
       FROM agg, total
       ORDER BY totalTokens DESC
       LIMIT 5000
@@ -166,7 +187,13 @@ export const QUERIES = {
         CASE WHEN SUM(input_tokens + cache_creation_input_tokens) > 0
              THEN CAST(SUM(cache_read_input_tokens) AS REAL) / SUM(input_tokens + cache_creation_input_tokens)
              ELSE 0 END                                     AS cacheHitRate,
-        SUM(reasoning_tokens)                               AS reasoningTokens
+        SUM(reasoning_tokens)                               AS reasoningTokens,
+        SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)} ${modelIdClause(bind, modelIds)}
       GROUP BY day
@@ -218,7 +245,13 @@ export const QUERIES = {
         CAST(strftime('%w', started_at/1000, 'unixepoch') AS INTEGER) AS weekday,
         CAST(strftime('%H', started_at/1000, 'unixepoch') AS INTEGER) AS hour,
         COUNT(*)                                                       AS calls,
-        SUM(computed_total_tokens)                                     AS totalTokens
+        SUM(computed_total_tokens)                                     AS totalTokens,
+        SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END)       AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)} ${modelIdClause(bind, modelIds)}
       GROUP BY weekday, hour
@@ -239,13 +272,190 @@ export const QUERIES = {
         SUM(output_tokens)                                  AS outputTokens,
         SUM(reasoning_tokens)                               AS reasoningTokens,
         SUM(cache_read_input_tokens)                        AS cacheReadTokens,
-        SUM(cache_creation_input_tokens)                    AS cacheCreationTokens
+        SUM(cache_creation_input_tokens)                    AS cacheCreationTokens,
+        SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)}
       GROUP BY day, model_id
       ORDER BY day ASC
     `
     return { sql }
+  },
+
+  /**
+   * 按 provider_id 聚合：用于「按供应商」页。
+   */
+  byProvider(range: Range): ParamQuery {
+    const sql = `
+      WITH agg AS (
+        SELECT
+          COALESCE(provider_id, '?') AS provider_id,
+          COUNT(*) AS calls,
+          SUM(computed_total_tokens) AS totalTokens,
+          SUM(input_tokens) AS inputTokens,
+          SUM(output_tokens) AS outputTokens,
+          SUM(reasoning_tokens) AS reasoningTokens,
+          SUM(cache_read_input_tokens) AS cacheReadTokens,
+          SUM(cache_creation_input_tokens) AS cacheCreationTokens,
+          SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
+          SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+          SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+          SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+        FROM model_usage
+        WHERE status='completed' ${rangeClause(range)}
+        GROUP BY provider_id
+      ),
+      total AS (SELECT SUM(totalTokens) AS s FROM agg)
+      SELECT
+        agg.provider_id           AS providerId,
+        agg.calls                 AS calls,
+        agg.totalTokens           AS totalTokens,
+        agg.inputTokens           AS inputTokens,
+        agg.outputTokens          AS outputTokens,
+        agg.reasoningTokens       AS reasoningTokens,
+        agg.cacheReadTokens       AS cacheReadTokens,
+        agg.cacheCreationTokens   AS cacheCreationTokens,
+        agg.errorCount            AS errorCount,
+        CASE WHEN (agg.inputTokens + agg.cacheCreationTokens) > 0
+             THEN CAST(agg.cacheReadTokens AS REAL) / (agg.inputTokens + agg.cacheCreationTokens)
+             ELSE 0 END          AS cacheHitRate,
+        CASE WHEN total.s > 0
+             THEN CAST(agg.totalTokens AS REAL) / total.s
+             ELSE 0 END          AS share,
+        agg.totalDurationMs       AS totalDurationMs,
+        agg.speedSampleCount      AS speedSampleCount,
+        agg.speedOutputTokens     AS speedOutputTokens,
+        agg.speedDurationMs       AS speedDurationMs,
+        agg.ttftSumMs             AS ttftSumMs,
+        agg.ttftSampleCount       AS ttftSampleCount
+      FROM agg, total
+      ORDER BY totalTokens DESC
+      LIMIT 5000
+    `
+    return { sql }
+  },
+
+  /**
+   * 按 provider_id + model_id 聚合：用于供应商详情页列出该供应商下所有模型。
+   */
+  byProviderModel(range: Range, providerId: string): ParamQuery {
+    const bind: unknown[] = [providerId, providerId]
+    const sql = `
+      WITH agg AS (
+        SELECT
+          model_id,
+          COUNT(*) AS calls,
+          SUM(computed_total_tokens) AS totalTokens,
+          SUM(input_tokens) AS inputTokens,
+          SUM(output_tokens) AS outputTokens,
+          SUM(reasoning_tokens) AS reasoningTokens,
+          SUM(cache_read_input_tokens) AS cacheReadTokens,
+          SUM(cache_creation_input_tokens) AS cacheCreationTokens,
+          SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
+          SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+          SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+          SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+        FROM model_usage
+        WHERE status='completed' AND provider_id = ? ${rangeClause(range)}
+        GROUP BY model_id
+      ),
+      total AS (SELECT SUM(totalTokens) AS s FROM agg)
+      SELECT
+        ? AS providerId,
+        agg.model_id              AS modelId,
+        agg.calls                 AS calls,
+        agg.totalTokens           AS totalTokens,
+        agg.inputTokens           AS inputTokens,
+        agg.outputTokens          AS outputTokens,
+        agg.reasoningTokens       AS reasoningTokens,
+        agg.cacheReadTokens       AS cacheReadTokens,
+        agg.cacheCreationTokens   AS cacheCreationTokens,
+        agg.errorCount            AS errorCount,
+        CASE WHEN (agg.inputTokens + agg.cacheCreationTokens) > 0
+             THEN CAST(agg.cacheReadTokens AS REAL) / (agg.inputTokens + agg.cacheCreationTokens)
+             ELSE 0 END          AS cacheHitRate,
+        CASE WHEN total.s > 0
+             THEN CAST(agg.totalTokens AS REAL) / total.s
+             ELSE 0 END          AS share,
+        agg.totalDurationMs       AS totalDurationMs,
+        agg.speedSampleCount      AS speedSampleCount,
+        agg.speedOutputTokens     AS speedOutputTokens,
+        agg.speedDurationMs       AS speedDurationMs,
+        agg.ttftSumMs             AS ttftSumMs,
+        agg.ttftSampleCount       AS ttftSampleCount
+      FROM agg, total
+      ORDER BY totalTokens DESC
+      LIMIT 5000
+    `
+    return { sql, bind }
+  },
+
+  /**
+   * 按 provider_id + model_id + day 聚合：用于供应商-模型详情页的日趋势图。
+   */
+  byDayByProviderModel(range: Range, providerId: string, modelId: string): ParamQuery {
+    const bind: unknown[] = [providerId, modelId]
+    const sql = `
+      SELECT
+        strftime('%Y-%m-%d', started_at/1000, 'unixepoch') AS day,
+        SUM(input_tokens)                                   AS inputTokens,
+        SUM(output_tokens)                                  AS outputTokens,
+        SUM(reasoning_tokens)                               AS reasoningTokens,
+        SUM(cache_read_input_tokens)                        AS cacheReadTokens,
+        SUM(cache_creation_input_tokens)                    AS cacheCreationTokens,
+        SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+      FROM model_usage
+      WHERE status='completed'
+        AND provider_id = ?
+        AND model_id = ?
+        ${rangeClause(range)}
+      GROUP BY day
+      ORDER BY day ASC
+    `
+    return { sql, bind }
+  },
+
+  /**
+   * 按 provider_id + model_id + (weekday, hour) 聚合：用于供应商-模型详情页的小时分布图。
+   */
+  byHourByProviderModel(range: Range, providerId: string, modelId: string): ParamQuery {
+    const bind: unknown[] = [providerId, modelId]
+    const sql = `
+      SELECT
+        CAST(strftime('%w', started_at/1000, 'unixepoch') AS INTEGER) AS weekday,
+        CAST(strftime('%H', started_at/1000, 'unixepoch') AS INTEGER) AS hour,
+        COUNT(*)                                                       AS calls,
+        SUM(computed_total_tokens)                                     AS totalTokens,
+        SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END)       AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+      FROM model_usage
+      WHERE status='completed'
+        AND provider_id = ?
+        AND model_id = ?
+        ${rangeClause(range)}
+      GROUP BY weekday, hour
+    `
+    return { sql, bind }
   },
 
   /**
@@ -418,6 +628,27 @@ function toStringOrNull(v: unknown): string | null {
   return String(v)
 }
 
+function computeTimingAggregates(
+  speedOutputTokens: number,
+  speedDurationMs: number,
+  speedSampleCount: number,
+  ttftSumMs: number,
+  ttftSampleCount: number,
+  totalDurationMs: number,
+): TimingAggregates {
+  return {
+    speedOutputTokens,
+    speedDurationMs,
+    speedSampleCount,
+    ttftSumMs,
+    ttftSampleCount,
+    totalDurationMs,
+    avgOutputSpeed: speedDurationMs > 0 ? (speedOutputTokens / speedDurationMs) * 1000 : null,
+    avgTtftMs: ttftSampleCount > 0 ? ttftSumMs / ttftSampleCount : null,
+    avgDurationMs: speedSampleCount > 0 ? totalDurationMs / speedSampleCount : null,
+  }
+}
+
 export function shapeOverview(
   model: WorkerExecResult,
   tool: WorkerExecResult,
@@ -436,6 +667,14 @@ export function shapeOverview(
   const cacheHitRate = cacheHitDenom > 0 ? cacheReadTokens / cacheHitDenom : 0
   let cost = 0
   for (const r of byModelRows) cost += r.cost
+  const timing = computeTimingAggregates(
+    toNumber(m[17]),
+    toNumber(m[18]),
+    toNumber(m[16]),
+    toNumber(m[19]),
+    toNumber(m[20]),
+    toNumber(m[14]),
+  )
   return {
     totalTokens,
     inputTokens,
@@ -455,6 +694,7 @@ export function shapeOverview(
     toolErrorCount: toNumber(t[1]),
     cacheHitRate,
     cost,
+    ...timing,
   }
 }
 
@@ -476,6 +716,14 @@ export function shapeByModel(
       cacheReadTokens,
       cacheCreationTokens,
     }
+    const timing = computeTimingAggregates(
+      toNumber(row[15]),
+      toNumber(row[16]),
+      toNumber(row[14]),
+      toNumber(row[17]),
+      toNumber(row[18]),
+      toNumber(row[12]),
+    )
     return {
       modelId,
       providerId: String(row[1] ?? '?'),
@@ -490,6 +738,7 @@ export function shapeByModel(
       cacheHitRate: toNumber(row[10]),
       share: toNumber(row[11]),
       cost: costFor(modelId, usage),
+      ...timing,
     }
   })
 }
@@ -499,19 +748,30 @@ export function shapeByDay(
   /** 来自 byDayByModel 的成本按 day 折叠 */
   costByDay: ReadonlyMap<string, number>,
 ): ByDayRow[] {
-  return r.rows.map((row) => ({
-    day: String(row[0] ?? ''),
-    calls: toNumber(row[1]),
-    totalTokens: toNumber(row[2]),
-    inputTokens: toNumber(row[3]),
-    outputTokens: toNumber(row[4]),
-    cacheReadTokens: toNumber(row[5]),
-    cacheCreationTokens: toNumber(row[6]),
-    errorCount: toNumber(row[7]),
-    cacheHitRate: toNumber(row[8]),
-    reasoningTokens: toNumber(row[9]),
-    cost: costByDay.get(String(row[0] ?? '')) ?? 0,
-  }))
+  return r.rows.map((row) => {
+    const timing = computeTimingAggregates(
+      toNumber(row[12]),
+      toNumber(row[13]),
+      toNumber(row[11]),
+      toNumber(row[14]),
+      toNumber(row[15]),
+      toNumber(row[10]),
+    )
+    return {
+      day: String(row[0] ?? ''),
+      calls: toNumber(row[1]),
+      totalTokens: toNumber(row[2]),
+      inputTokens: toNumber(row[3]),
+      outputTokens: toNumber(row[4]),
+      cacheReadTokens: toNumber(row[5]),
+      cacheCreationTokens: toNumber(row[6]),
+      errorCount: toNumber(row[7]),
+      cacheHitRate: toNumber(row[8]),
+      reasoningTokens: toNumber(row[9]),
+      cost: costByDay.get(String(row[0] ?? '')) ?? 0,
+      ...timing,
+    }
+  })
 }
 
 export function shapeBySession(
@@ -537,15 +797,26 @@ export function shapeBySession(
 export function shapeByDayByModel(
   r: WorkerExecResult,
 ): ByDayByModelRow[] {
-  return r.rows.map((row) => ({
-    day: String(row[0] ?? ''),
-    modelId: String(row[1] ?? ''),
-    inputTokens: toNumber(row[2]),
-    outputTokens: toNumber(row[3]),
-    reasoningTokens: toNumber(row[4]),
-    cacheReadTokens: toNumber(row[5]),
-    cacheCreationTokens: toNumber(row[6]),
-  }))
+  return r.rows.map((row) => {
+    const timing = computeTimingAggregates(
+      toNumber(row[9]),
+      toNumber(row[10]),
+      toNumber(row[8]),
+      toNumber(row[11]),
+      toNumber(row[12]),
+      toNumber(row[7]),
+    )
+    return {
+      day: String(row[0] ?? ''),
+      modelId: String(row[1] ?? ''),
+      inputTokens: toNumber(row[2]),
+      outputTokens: toNumber(row[3]),
+      reasoningTokens: toNumber(row[4]),
+      cacheReadTokens: toNumber(row[5]),
+      cacheCreationTokens: toNumber(row[6]),
+      ...timing,
+    }
+  })
 }
 
 export function shapeBySessionByModel(
@@ -607,14 +878,131 @@ export function aggregateCostBySession(
 }
 
 export function shapeByHour(r: WorkerExecResult): ByHourGrid {
-  const cells = r.rows.map((row) => ({
-    weekday: toNumber(row[0]),
-    hour: toNumber(row[1]),
-    calls: toNumber(row[2]),
-    totalTokens: toNumber(row[3]),
-  }))
+  const cells = r.rows.map((row) => {
+    const speedDurationMs = toNumber(row[6])
+    const speedSampleCount = toNumber(row[5])
+    const ttftSampleCount = toNumber(row[8])
+    return {
+      weekday: toNumber(row[0]),
+      hour: toNumber(row[1]),
+      calls: toNumber(row[2]),
+      totalTokens: toNumber(row[3]),
+      speedOutputTokens: toNumber(row[7]),
+      speedDurationMs,
+      speedSampleCount,
+      ttftSumMs: toNumber(row[9]),
+      ttftSampleCount,
+      totalDurationMs: toNumber(row[4]),
+      avgOutputSpeed: speedDurationMs > 0 ? (toNumber(row[7]) / speedDurationMs) * 1000 : null,
+      avgTtftMs: ttftSampleCount > 0 ? toNumber(row[9]) / ttftSampleCount : null,
+      avgDurationMs: speedSampleCount > 0 ? toNumber(row[4]) / speedSampleCount : null,
+    }
+  })
   const maxTokens = cells.reduce((m, c) => (c.totalTokens > m ? c.totalTokens : m), 0)
   return { cells, maxTokens }
+}
+
+export function shapeByProvider(r: WorkerExecResult): ByProviderRow[] {
+  return r.rows.map((row) => {
+    const inputTokens = toNumber(row[4])
+    const outputTokens = toNumber(row[5])
+    const reasoningTokens = toNumber(row[6])
+    const cacheReadTokens = toNumber(row[7])
+    const cacheCreationTokens = toNumber(row[8])
+    const providerId = String(row[0] ?? '?')
+    const timing = computeTimingAggregates(
+      toNumber(row[13]),
+      toNumber(row[14]),
+      toNumber(row[12]),
+      toNumber(row[15]),
+      toNumber(row[16]),
+      toNumber(row[11]),
+    )
+    return {
+      providerId,
+      calls: toNumber(row[1]),
+      totalTokens: toNumber(row[2]),
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      errorCount: toNumber(row[9]),
+      cacheHitRate: toNumber(row[10]),
+      share: toNumber(row[11]),
+      cost: 0,
+      ...timing,
+    }
+  })
+}
+
+export function shapeByProviderModel(r: WorkerExecResult): ByProviderModelRow[] {
+  return r.rows.map((row) => {
+    const inputTokens = toNumber(row[5])
+    const outputTokens = toNumber(row[6])
+    const reasoningTokens = toNumber(row[7])
+    const cacheReadTokens = toNumber(row[8])
+    const cacheCreationTokens = toNumber(row[9])
+    const providerId = String(row[0] ?? '?')
+    const modelId = String(row[1] ?? '')
+    const timing = computeTimingAggregates(
+      toNumber(row[14]),
+      toNumber(row[15]),
+      toNumber(row[13]),
+      toNumber(row[16]),
+      toNumber(row[17]),
+      toNumber(row[12]),
+    )
+    return {
+      providerId,
+      modelId,
+      calls: toNumber(row[2]),
+      totalTokens: toNumber(row[3]),
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      errorCount: toNumber(row[10]),
+      cacheHitRate: toNumber(row[11]),
+      share: toNumber(row[12]),
+      cost: costFor(modelId, {
+        inputTokens,
+        outputTokens,
+        reasoningTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
+      }),
+      ...timing,
+    }
+  })
+}
+
+export function shapeByDayByProviderModel(r: WorkerExecResult): ByDayRow[] {
+  return r.rows.map((row) => {
+    const timing = computeTimingAggregates(
+      toNumber(row[8]),
+      toNumber(row[9]),
+      toNumber(row[7]),
+      toNumber(row[10]),
+      toNumber(row[11]),
+      toNumber(row[6]),
+    )
+    return {
+      day: String(row[0] ?? ''),
+      calls: 0,
+      totalTokens: 0,
+      inputTokens: toNumber(row[1]),
+      outputTokens: toNumber(row[2]),
+      cacheReadTokens: toNumber(row[4]),
+      cacheCreationTokens: toNumber(row[5]),
+      errorCount: 0,
+      cacheHitRate: 0,
+      reasoningTokens: toNumber(row[3]),
+      cost: 0,
+      ...timing,
+    }
+  })
 }
 
 export function shapeByTool(r: WorkerExecResult): ByToolRow[] {

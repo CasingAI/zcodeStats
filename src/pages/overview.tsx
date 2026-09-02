@@ -6,7 +6,14 @@ import type { OpenedDb } from '../db/client.ts'
 import type { OverviewKpis } from '../db/types.ts'
 import { marksSignature, useMarks, useCustomModels } from '../lib/model-groups.ts'
 import { useRange } from '../lib/range-context.tsx'
-import { formatCount, formatFull, formatPct, formatRMB } from '../lib/format.ts'
+import {
+  formatCount,
+  formatDuration,
+  formatFull,
+  formatPct,
+  formatRMB,
+  formatTokensPerSecond,
+} from '../lib/format.ts'
 
 export function OverviewPage({ db }: { db: OpenedDb }) {
   const { range, setPreset, setCustom } = useRange()
@@ -117,6 +124,27 @@ function KpiGrid(props: { data?: OverviewKpis; errorRate?: number; loading?: boo
         loading={loading}
         value={data ? formatFull(data.outputTokens) : ''}
         sub={data ? `含 reasoning ${formatCount(data.reasoningTokens)}` : ''}
+      />
+      <KpiCard
+        label="平均输出速度"
+        tone="blue"
+        loading={loading}
+        value={data ? (data.avgOutputSpeed != null ? formatTokensPerSecond(data.avgOutputSpeed) : '—') : ''}
+        sub={data ? `${formatFull(data.speedSampleCount)} 次有效样本` : ''}
+      />
+      <KpiCard
+        label="平均 TTFT"
+        tone="green"
+        loading={loading}
+        value={data ? (data.avgTtftMs != null ? formatDuration(data.avgTtftMs) : '—') : ''}
+        sub={data ? `${formatFull(data.ttftSampleCount)} 次有效样本` : ''}
+      />
+      <KpiCard
+        label="平均调用耗时"
+        tone="default"
+        loading={loading}
+        value={data ? (data.avgDurationMs != null ? formatDuration(data.avgDurationMs) : '—') : ''}
+        sub={data ? `总耗时 ${formatDuration(data.totalDurationMs)}` : ''}
       />
       <KpiCard
         label="大致成本"

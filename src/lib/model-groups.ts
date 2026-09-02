@@ -28,7 +28,7 @@ import {
   setCustomModels,
   setMarks,
 } from './pricing.ts'
-import type { ByModelRow } from '../db/types.ts'
+import type { ByModelRow, ByProviderModelRow, TimingAggregates } from '../db/types.ts'
 
 const MARKS_KEY = 'zcode-stats.model-marks'
 const CUSTOM_KEY = 'zcode-stats.custom-models'
@@ -270,7 +270,7 @@ export function resolveGroupKey(modelId: string, mode: GroupMode, marks: MarkMap
   return modelId
 }
 
-export type GroupedModelRow = {
+export type GroupedModelRow = TimingAggregates & {
   /** 分组键（按 ID 模式=原始 id；按名字模式=归一化名/标记值） */
   groupKey: string
   /** 表格首列主标题：识别出的内置模型走价目表 key 形式（如 "minimax-m3"），未识别回退 groupKey */
@@ -298,6 +298,17 @@ export type GroupedModelRow = {
 }
 
 /** 把按 model_id+provider 聚合的行合并成分组行，按总 token 降序。 */
+/** 把 ByProviderModelRow[] 转成 ByModelRow[] 后按模型名分组。
+ * 用于「供应商详情页」：同一 provider 下把不同 raw model_id 按名字聚合。 */
+export function resolveProviderModelGroups(
+  rows: readonly ByProviderModelRow[],
+  mode: GroupMode,
+  marks: MarkMap,
+): GroupedModelRow[] {
+  const mapped: ByModelRow[] = rows.map((r) => ({ ...r }))
+  return resolveGroups(mapped, mode, marks)
+}
+
 export function resolveGroups(
   rows: readonly ByModelRow[],
   mode: GroupMode,
@@ -329,6 +340,15 @@ export function resolveGroups(
         share: 0,
         cost: 0,
         recognized: false,
+        speedOutputTokens: 0,
+        speedDurationMs: 0,
+        speedSampleCount: 0,
+        ttftSumMs: 0,
+        ttftSampleCount: 0,
+        totalDurationMs: 0,
+        avgOutputSpeed: null,
+        avgTtftMs: null,
+        avgDurationMs: null,
       }
       byKey.set(key, g)
     }
@@ -343,6 +363,12 @@ export function resolveGroups(
     g.cacheReadTokens += r.cacheReadTokens
     g.cacheCreationTokens += r.cacheCreationTokens
     g.errorCount += r.errorCount
+    g.speedOutputTokens += r.speedOutputTokens
+    g.speedDurationMs += r.speedDurationMs
+    g.speedSampleCount += r.speedSampleCount
+    g.ttftSumMs += r.ttftSumMs
+    g.ttftSampleCount += r.ttftSampleCount
+    g.totalDurationMs += r.totalDurationMs
     // 成本：按底层 model_id 各自计价；pricing 已感知 marks
     g.cost += costFor(id, r)
   }
@@ -352,6 +378,9 @@ export function resolveGroups(
     const denom = g.inputTokens + g.cacheCreationTokens
     g.cacheHitRate = denom > 0 ? g.cacheReadTokens / denom : 0
     g.share = grandTotal > 0 ? g.totalTokens / grandTotal : 0
+    g.avgOutputSpeed = g.speedDurationMs > 0 ? (g.speedOutputTokens / g.speedDurationMs) * 1000 : null
+    g.avgTtftMs = g.ttftSampleCount > 0 ? g.ttftSumMs / g.ttftSampleCount : null
+    g.avgDurationMs = g.speedSampleCount > 0 ? g.totalDurationMs / g.speedSampleCount : null
     // 展示主标题：识别出的组用价目表 key 的可读名（如 "MiniMax M3"），未识别回退到 groupKey
     if (g.recognized) {
       const firstId = g.modelIds[0] ?? g.groupKey

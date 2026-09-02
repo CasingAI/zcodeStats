@@ -34,6 +34,28 @@ export function formatDuration(ms: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
+/** tokens/s：1 → "1 tok/s", 1_200 → "1.2K tok/s", 3_500_000 → "3.5M tok/s" */
+export function formatTokensPerSecond(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '—'
+  if (n === 0) return '0 tok/s'
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(abs >= 10_000_000 ? 1 : 2)}M tok/s`
+  if (abs >= 1000) return `${(n / 1000).toFixed(abs >= 100_000 ? 1 : 2)}K tok/s`
+  if (abs >= 100) return `${n.toFixed(1)} tok/s`
+  return `${Math.round(n)} tok/s`
+}
+
+/** tokens/s 紧凑版：省略单位，用于表头较窄的列 */
+export function formatTokensPerSecondCompact(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '—'
+  if (n === 0) return '0'
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(abs >= 10_000_000 ? 1 : 2)}M`
+  if (abs >= 1000) return `${(n / 1000).toFixed(abs >= 100_000 ? 1 : 2)}K`
+  if (abs >= 100) return `${n.toFixed(1)}`
+  return `${Math.round(n)}`
+}
+
 /** 字节：1024 进制 */
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return '—'

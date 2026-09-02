@@ -24,10 +24,15 @@ import {
 } from '../lib/model-groups.ts'
 import { useRange } from '../lib/range-context.tsx'
 import { displayNameOf, costFor } from '../lib/pricing.ts'
-import { formatCount, formatRMB } from '../lib/format.ts'
+import {
+  formatCount,
+  formatDuration,
+  formatRMB,
+  formatTokensPerSecond,
+} from '../lib/format.ts'
 import { splinePaths } from '../lib/spline-paths.ts'
 
-type Metric = 'token' | 'cost'
+type Metric = 'token' | 'cost' | 'speed' | 'ttft'
 type Dim = 'total' | 'model'
 type TopN = '5' | '8' | 'all'
 
@@ -102,6 +107,8 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
             items={[
               { id: 'token', label: 'Token' },
               { id: 'cost', label: '成本' },
+              { id: 'speed', label: '速度' },
+              { id: 'ttft', label: 'TTFT' },
             ]}
           />
           <RangeSelectorTabs state={rs} ariaLabel="时间范围" />
@@ -220,6 +227,14 @@ const costSeries = [
 function buildData(rows: ByDayRow[], metric: Metric) {
   const days = rows.map((r) => r.day)
   if (metric === 'cost') return toTimeAlignedData(days, [rows.map((r) => r.cost)])
+  if (metric === 'speed') {
+    return toTimeAlignedData(days, [
+      rows.map((r) => (r.avgOutputSpeed != null ? r.avgOutputSpeed : 0)),
+    ])
+  }
+  if (metric === 'ttft') {
+    return toTimeAlignedData(days, [rows.map((r) => (r.avgTtftMs != null ? r.avgTtftMs : 0))])
+  }
   return toTimeAlignedData(days, [
     rows.map((r) => r.totalTokens),
     rows.map((r) => r.cacheReadTokens),

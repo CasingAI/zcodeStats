@@ -2,7 +2,33 @@
 // pure-types so it can be imported by both UI and worker code without
 // pulling in VFS / sqlite3 references.
 
-export type OverviewKpis = {
+/** 输出速度与首 token 延迟的派生指标 */
+export type TimingStats = {
+  /** output_tokens / duration_ms * 1000（tok/s）；无有效样本时为 null */
+  avgOutputSpeed: number | null
+  /** time_to_first_token_ms 平均值（ms）；无有效样本时为 null */
+  avgTtftMs: number | null
+  /** duration_ms 平均值（ms）；无有效样本时为 null */
+  avgDurationMs: number | null
+  /** 参与速度计算的调用数 */
+  speedSampleCount: number
+  /** 参与 TTFT 计算的调用数 */
+  ttftSampleCount: number
+}
+
+/** 用于需要跨行重新聚合的中间字段（如按模型名/供应商分组） */
+export type TimingAggregates = TimingStats & {
+  /** 参与速度计算的 output_tokens 累加 */
+  speedOutputTokens: number
+  /** 参与速度计算的 duration_ms 累加（ms） */
+  speedDurationMs: number
+  /** 参与 TTFT 计算的 time_to_first_token_ms 累加（ms） */
+  ttftSumMs: number
+  /** 参与耗时计算的 duration_ms 累加（ms） */
+  totalDurationMs: number
+}
+
+export type OverviewKpis = TimingStats & {
   totalTokens: number
   inputTokens: number
   outputTokens: number
@@ -25,7 +51,7 @@ export type OverviewKpis = {
   cost: number
 }
 
-export type ByModelRow = {
+export type ByModelRow = TimingAggregates & {
   modelId: string
   providerId: string
   calls: number
@@ -43,7 +69,42 @@ export type ByModelRow = {
   cost: number
 }
 
-export type ByDayRow = {
+export type ByProviderRow = TimingAggregates & {
+  providerId: string
+  calls: number
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  errorCount: number
+  /** cache_read / (input + cache_creation + cache_read)；无分母时为 0 */
+  cacheHitRate: number
+  share: number
+  /** ¥ 估算成本 */
+  cost: number
+}
+
+export type ByProviderModelRow = TimingAggregates & {
+  providerId: string
+  modelId: string
+  calls: number
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  errorCount: number
+  /** cache_read / (input + cache_creation + cache_read)；无分母时为 0 */
+  cacheHitRate: number
+  share: number
+  /** ¥ 估算成本 */
+  cost: number
+}
+
+export type ByDayRow = TimingAggregates & {
   day: string
   calls: number
   totalTokens: number
@@ -58,7 +119,7 @@ export type ByDayRow = {
   cost: number
 }
 
-export type ByDayByModelRow = {
+export type ByDayByModelRow = TimingAggregates & {
   day: string
   modelId: string
   inputTokens: number
@@ -94,7 +155,7 @@ export type BySessionRow = {
   cost: number
 }
 
-export type ByHourCell = {
+export type ByHourCell = TimingStats & {
   weekday: number // 0=Sun … 6=Sat
   hour: number // 0-23
   calls: number

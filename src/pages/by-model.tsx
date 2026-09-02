@@ -27,7 +27,13 @@ import {
 } from '../lib/model-groups.ts'
 import { useRange } from '../lib/range-context.tsx'
 import { builtinModelKeys, isMarkedModel } from '../lib/pricing.ts'
-import { formatCount, formatPct, formatRMB } from '../lib/format.ts'
+import {
+  formatCount,
+  formatDuration,
+  formatPct,
+  formatRMB,
+  formatTokensPerSecondCompact,
+} from '../lib/format.ts'
 
 const BYMODEL_LIMIT = 5000
 
@@ -531,6 +537,29 @@ const columns = [
     align: 'right' as const,
     width: '80px',
     render: (r: GroupedModelRow) => formatCount(r.reasoningTokens),
+  },
+  {
+    key: 'speed',
+    header: '输出速度',
+    align: 'right' as const,
+    width: '85px',
+    render: (r: GroupedModelRow) =>
+      r.avgOutputSpeed != null ? formatTokensPerSecondCompact(r.avgOutputSpeed) : '—',
+  },
+  {
+    key: 'ttft',
+    header: '首 token',
+    align: 'right' as const,
+    width: '75px',
+    render: (r: GroupedModelRow) => (r.avgTtftMs != null ? formatDuration(r.avgTtftMs) : '—'),
+  },
+  {
+    key: 'duration',
+    header: '平均耗时',
+    align: 'right' as const,
+    width: '75px',
+    render: (r: GroupedModelRow) =>
+      r.avgDurationMs != null ? formatDuration(r.avgDurationMs) : '—',
   },
   {
     key: 'cost',
