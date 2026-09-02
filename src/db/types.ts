@@ -143,6 +143,9 @@ export type SpeedTrendRow = {
   speedSampleCount: number
   ttftSumMs: number
   ttftSampleCount: number
+  /** 桶内单次调用解码速度的最大/最小值（tok/s，同 SPEED_VALID 口径）；无有效样本为 null */
+  speedMaxTokPerS: number | null
+  speedMinTokPerS: number | null
 }
 
 export type BySessionByModelRow = {

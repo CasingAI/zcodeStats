@@ -320,6 +320,7 @@ export const QUERIES = {
   /**
    * 速度趋势：按「本地小时桶 × model_id」聚合速度样本（纯解码口径，见 SPEED_VALID）。
    * 日/周粒度由页面在前端折叠小时桶得到，一条查询服务三种粒度。
+   * speedMax/speedMin 是桶内单次调用速度的极值（平均/最大/最小三种统计口径用）。
    * ttftSumMs/ttftSampleCount 给页面的「平均首字等待」KPI 用。
    */
   speedTrend(range: Range): ParamQuery {
@@ -332,7 +333,9 @@ export const QUERIES = {
         SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
         SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount,
+        MAX(CASE WHEN ${SPEED_VALID} THEN output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) END) AS speedMaxTokPerS,
+        MIN(CASE WHEN ${SPEED_VALID} THEN output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) END) AS speedMinTokPerS
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)}
       GROUP BY bucket, model_id
@@ -901,7 +904,7 @@ export function shapeBySessionByModel(
   }))
 }
 
-/** speedTrend 的列序：bucket, modelId, speedOutputTokens, speedDurationMs, speedSampleCount, ttftSumMs, ttftSampleCount */
+/** speedTrend 的列序：bucket, modelId, speedOutputTokens, speedDurationMs, speedSampleCount, ttftSumMs, ttftSampleCount, speedMaxTokPerS, speedMinTokPerS */
 export function shapeSpeedTrend(r: WorkerExecResult): SpeedTrendRow[] {
   return r.rows.map((row) => ({
     bucket: String(row[0] ?? ''),
@@ -911,6 +914,8 @@ export function shapeSpeedTrend(r: WorkerExecResult): SpeedTrendRow[] {
     speedSampleCount: toNumber(row[4]),
     ttftSumMs: toNumber(row[5]),
     ttftSampleCount: toNumber(row[6]),
+    speedMaxTokPerS: toNumberOrNull(row[7]),
+    speedMinTokPerS: toNumberOrNull(row[8]),
   }))
 }
 

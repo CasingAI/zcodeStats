@@ -32,6 +32,13 @@ type Gran = (typeof GRAN_ITEMS)[number]['id']
 
 type TopN = '5' | '8' | 'all'
 
+const STAT_ITEMS = [
+  { id: 'avg', label: '平均' },
+  { id: 'max', label: '最大' },
+  { id: 'min', label: '最小' },
+] as const
+type StatMode = (typeof STAT_ITEMS)[number]['id']
+
 const modelPaths = splinePaths()
 
 export function SpeedPage({ db }: { db: OpenedDb }) {
@@ -40,6 +47,7 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
   const marks = useMarks()
   const [gran, setGran] = useState<Gran>('day')
   const [topN, setTopN] = useState<TopN>('8')
+  const [statMode, setStatMode] = useState<StatMode>('avg')
 
   // marks 不影响 SQL 结果（速度与计价无关），只影响前端分组 → 不进 query key
   const state = useQuery<SpeedTrendRow[]>(
@@ -53,13 +61,13 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
 
   const series = useMemo(() => {
     if (state.kind !== 'ok') return null
-    return buildSpeedSeries(state.data, gran, topN, marks)
-  }, [state.kind === 'ok' ? state.data : null, gran, topN, marks])
+    return buildSpeedSeries(state.data, gran, topN, marks, statMode)
+  }, [state.kind === 'ok' ? state.data : null, gran, topN, marks, statMode])
 
   const kpis = useMemo(() => {
     if (state.kind !== 'ok') return null
-    return buildKpis(state.data, marks)
-  }, [state.kind === 'ok' ? state.data : null, marks])
+    return buildKpis(state.data, marks, statMode)
+  }, [state.kind === 'ok' ? state.data : null, marks, statMode])
 
   const xFormat =
     gran === 'hour'
@@ -81,11 +89,17 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
           <h1 class="page__title">输出速度</h1>
           <p class="page__subtitle">
             各模型解码速度趋势（同一张图，悬浮查看数值；图例可点击隐藏/显示单条线，悬停可聚焦该系列）。
-            解码速度 = 输出 token ÷（总时长 − 首 token 等待），按 token 加权，不含等首字的时间；
-            仅统计记录了有效首字时间的调用，无样本时段断线
+            解码速度 = 输出 token ÷（总时长 − 首 token 等待），不含等首字的时间，仅统计记录了有效首字时间的调用，无样本时段断线。
+            统计口径：平均 = 按 token 加权；最大/最小 = 该时段内单次调用的极值
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <SegmentedControl<StatMode>
+            value={statMode}
+            onChange={setStatMode}
+            ariaLabel="统计口径"
+            items={STAT_ITEMS}
+          />
           <SegmentedControl<TopN>
             value={topN}
             onChange={setTopN}
@@ -118,10 +132,10 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
           <>
             <div class="kpi-grid kpi-grid--3" style={{ marginBottom: 12 }}>
               <KpiCard
-                label="区间解码速度"
+                label={statMode === 'avg' ? '区间解码速度' : statMode === 'max' ? '单次最快速度' : '单次最慢速度'}
                 tone="orange"
-                value={kpis.overall == null ? '—' : formatTokensPerSecond(kpis.overall)}
-                sub={`${formatFull(kpis.samples)} 次有效样本`}
+                value={kpis.headline == null ? '—' : formatTokensPerSecond(kpis.headline)}
+                sub={kpis.headlineSub}
               />
               <KpiCard
                 label="平均首字等待"
@@ -188,10 +202,35 @@ type SpeedBucket = {
   speedOutputTokens: number
   speedDurationMs: number
   speedSampleCount: number
+  speedMaxTokPerS: number | null
+  speedMinTokPerS: number | null
 }
 
-function bucketSpeed(b: SpeedBucket): number | null {
+/** 按统计口径取桶速度：平均 = token 加权；最大/最小 = 单次调用极值 */
+function bucketSpeed(b: SpeedBucket, mode: StatMode): number | null {
+  if (mode === 'max') return b.speedMaxTokPerS
+  if (mode === 'min') return b.speedMinTokPerS
   return b.speedDurationMs > 0 ? (b.speedOutputTokens / b.speedDurationMs) * 1000 : null
+}
+
+/** 累加一段样本聚合到桶：加权字段直接累加，极值字段取极值（null 表示无有效样本） */
+function mergeBucket(
+  dst: SpeedBucket,
+  outputTokens: number,
+  durationMs: number,
+  samples: number,
+  maxTokPerS: number | null,
+  minTokPerS: number | null,
+): void {
+  dst.speedOutputTokens += outputTokens
+  dst.speedDurationMs += durationMs
+  dst.speedSampleCount += samples
+  if (maxTokPerS != null && (dst.speedMaxTokPerS == null || maxTokPerS > dst.speedMaxTokPerS)) {
+    dst.speedMaxTokPerS = maxTokPerS
+  }
+  if (minTokPerS != null && (dst.speedMinTokPerS == null || minTokPerS < dst.speedMinTokPerS)) {
+    dst.speedMinTokPerS = minTokPerS
+  }
 }
 
 type SpeedSeries = {
@@ -209,13 +248,14 @@ type SpeedSeries = {
 /**
  * 把「小时桶 × model_id」行折叠到所选粒度，按模型分线。
  * 组 key 走 resolveGroupKey（尊重标记/改名），按区间速度样本的 output_tokens 降序取 Top N；
- * 未入选模型合并为「其他」——先累加原始 out/dur 再算加权速度（不能直接加 tok/s）。
+ * 未入选模型合并为「其他」——平均先累加原始 out/dur 再算加权速度，最大/最小取极值。
  */
 function buildSpeedSeries(
   rows: readonly SpeedTrendRow[],
   gran: Gran,
   topN: TopN,
   marks: MarkMap,
+  statMode: StatMode,
 ): SpeedSeries {
   const keys: string[] = []
   const keySeen = new Set<string>()
@@ -236,14 +276,14 @@ function buildSpeedSeries(
     }
     const b = gm.get(bk)
     if (b) {
-      b.speedOutputTokens += r.speedOutputTokens
-      b.speedDurationMs += r.speedDurationMs
-      b.speedSampleCount += r.speedSampleCount
+      mergeBucket(b, r.speedOutputTokens, r.speedDurationMs, r.speedSampleCount, r.speedMaxTokPerS, r.speedMinTokPerS)
     } else {
       gm.set(bk, {
         speedOutputTokens: r.speedOutputTokens,
         speedDurationMs: r.speedDurationMs,
         speedSampleCount: r.speedSampleCount,
+        speedMaxTokPerS: r.speedMaxTokPerS,
+        speedMinTokPerS: r.speedMinTokPerS,
       })
     }
     groupTotals.set(gk, (groupTotals.get(gk) ?? 0) + r.speedOutputTokens)
@@ -270,7 +310,7 @@ function buildSpeedSeries(
     })
     ys.push(keys.map((k) => {
       const b = gm.get(k)
-      return b ? bucketSpeed(b) : null
+      return b ? bucketSpeed(b, statMode) : null
     }))
   }
   if (tail.length > 0) {
@@ -279,9 +319,7 @@ function buildSpeedSeries(
       for (const [k, b] of groups.get(gk) ?? []) {
         const m = merged.get(k)
         if (m) {
-          m.speedOutputTokens += b.speedOutputTokens
-          m.speedDurationMs += b.speedDurationMs
-          m.speedSampleCount += b.speedSampleCount
+          mergeBucket(m, b.speedOutputTokens, b.speedDurationMs, b.speedSampleCount, b.speedMaxTokPerS, b.speedMinTokPerS)
         } else {
           merged.set(k, { ...b })
         }
@@ -296,27 +334,30 @@ function buildSpeedSeries(
     })
     ys.push(keys.map((k) => {
       const b = merged.get(k)
-      return b ? bucketSpeed(b) : null
+      return b ? bucketSpeed(b, statMode) : null
     }))
   }
   return { keys, ys, defs }
 }
 
 type SpeedKpis = {
-  /** 区间整体加权解码速度（tok/s）；无有效样本时为 null */
-  overall: number | null
-  samples: number
+  /** 随统计口径变化的头条数值（tok/s）；无有效样本时为 null */
+  headline: number | null
+  /** 头条说明文字 */
+  headlineSub: string
   /** 全区间平均首字等待（ms）；无 TTFT 样本时为 null */
   ttftAvg: number | null
   ttftSamples: number
-  /** 样本 ≥ 10 次的组里解码速度最高者 */
+  /** 样本 ≥ 10 次的组里按当前口径速度最高者 */
   fastest: { key: string; speed: number; n: number } | null
 }
 
-function buildKpis(rows: readonly SpeedTrendRow[], marks: MarkMap): SpeedKpis {
+function buildKpis(rows: readonly SpeedTrendRow[], marks: MarkMap, statMode: StatMode): SpeedKpis {
   let outputTokens = 0
   let durationMs = 0
   let samples = 0
+  let maxTokPerS: number | null = null
+  let minTokPerS: number | null = null
   let ttftSumMs = 0
   let ttftSamples = 0
   const byGroup = new Map<string, SpeedBucket>()
@@ -324,33 +365,47 @@ function buildKpis(rows: readonly SpeedTrendRow[], marks: MarkMap): SpeedKpis {
     outputTokens += r.speedOutputTokens
     durationMs += r.speedDurationMs
     samples += r.speedSampleCount
+    if (r.speedMaxTokPerS != null && (maxTokPerS == null || r.speedMaxTokPerS > maxTokPerS)) {
+      maxTokPerS = r.speedMaxTokPerS
+    }
+    if (r.speedMinTokPerS != null && (minTokPerS == null || r.speedMinTokPerS < minTokPerS)) {
+      minTokPerS = r.speedMinTokPerS
+    }
     ttftSumMs += r.ttftSumMs
     ttftSamples += r.ttftSampleCount
     const gk = resolveGroupKey(r.modelId, 'name', marks)
     const b = byGroup.get(gk)
     if (b) {
-      b.speedOutputTokens += r.speedOutputTokens
-      b.speedDurationMs += r.speedDurationMs
-      b.speedSampleCount += r.speedSampleCount
+      mergeBucket(b, r.speedOutputTokens, r.speedDurationMs, r.speedSampleCount, r.speedMaxTokPerS, r.speedMinTokPerS)
     } else {
       byGroup.set(gk, {
         speedOutputTokens: r.speedOutputTokens,
         speedDurationMs: r.speedDurationMs,
         speedSampleCount: r.speedSampleCount,
+        speedMaxTokPerS: r.speedMaxTokPerS,
+        speedMinTokPerS: r.speedMinTokPerS,
       })
     }
   }
   let fastest: SpeedKpis['fastest'] = null
   for (const [key, b] of byGroup) {
     if (b.speedSampleCount < 10) continue
-    const speed = bucketSpeed(b)
+    const speed = bucketSpeed(b, statMode)
     if (speed != null && (fastest == null || speed > fastest.speed)) {
       fastest = { key, speed, n: b.speedSampleCount }
     }
   }
+  const headline =
+    statMode === 'max' ? maxTokPerS :
+    statMode === 'min' ? minTokPerS :
+    durationMs > 0 ? (outputTokens / durationMs) * 1000 : null
+  const headlineSub =
+    statMode === 'max' ? '区间内单次调用的最高速度' :
+    statMode === 'min' ? '区间内单次调用的最低速度' :
+    `${formatFull(samples)} 次有效样本`
   return {
-    overall: durationMs > 0 ? (outputTokens / durationMs) * 1000 : null,
-    samples,
+    headline,
+    headlineSub,
     ttftAvg: ttftSamples > 0 ? ttftSumMs / ttftSamples : null,
     ttftSamples,
     fastest,

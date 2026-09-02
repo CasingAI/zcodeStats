@@ -206,8 +206,11 @@ export function UPlotChart({
     )
     // 图例行不含 index 0（x 轴）；万一含 x 行则行数与 series 总数一致，偏移取 0
     const rowOffset = legendRows.length === chart.series.length ? 0 : 1
+    // uPlot 语义陷阱：setSeries(i, {focus: …}) 不看 focus 的值，一律聚焦第 i 条
+    // （传 focus:false 会把 series[i] 设为焦点，离开后永远恢复不了）。
+    // 取消聚焦必须传 i=null，内部 setFocus(null) 才会把所有系列的 alpha 恢复为 1。
     const clearFocus = () => {
-      for (let i = 1; i < chart.series.length; i++) chart.setSeries(i, { focus: false }, false)
+      chart.setSeries(null, { focus: true }, false)
     }
     const offHover: (() => void)[] = legendRows.map((row, ri) => {
       const si = ri + rowOffset
