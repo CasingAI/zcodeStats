@@ -28,7 +28,7 @@ export type TimingAggregates = TimingStats & {
   totalDurationMs: number
 }
 
-export type OverviewKpis = TimingStats & {
+export type OverviewKpis = TimingAggregates & {
   totalTokens: number
   inputTokens: number
   outputTokens: number
@@ -155,7 +155,7 @@ export type BySessionRow = {
   cost: number
 }
 
-export type ByHourCell = TimingStats & {
+export type ByHourCell = TimingAggregates & {
   weekday: number // 0=Sun … 6=Sat
   hour: number // 0-23
   calls: number

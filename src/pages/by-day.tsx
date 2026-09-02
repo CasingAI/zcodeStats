@@ -156,10 +156,7 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
                 time
                 height={300}
                 seriesDefs={modelSeries.defs}
-                yFormat={metric === 'token'
-                  ? (v) => (Math.abs(v) >= 1000 ? formatCount(v) : String(Math.round(v)))
-                  : (v) => formatRMB(v)
-                }
+                yFormat={metricFormatter(metric)}
                 xFormat={(v) => {
                   const d = new Date(v * 1000)
                   return `${d.getUTCFullYear() % 100}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
@@ -170,11 +167,8 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
                 data={buildData(state.data.rows, metric)}
                 time
                 height={280}
-                seriesDefs={metric === 'token' ? tokenSeries : costSeries}
-                yFormat={metric === 'token'
-                  ? (v) => (Math.abs(v) >= 1000 ? formatCount(v) : String(Math.round(v)))
-                  : (v) => formatRMB(v)
-                }
+                seriesDefs={totalSeries(metric)}
+                yFormat={metricFormatter(metric)}
                 xFormat={(v) => {
                   const d = new Date(v * 1000)
                   return `${d.getUTCFullYear() % 100}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
@@ -224,6 +218,42 @@ const costSeries = [
   },
 ]
 
+const speedSeries = [
+  {
+    label: '输出速度 (tok/s)',
+    stroke: '#8e6cc7',
+    width: 2,
+    fill: 'rgba(142, 108, 199, 0.12)',
+    value: (_u: unknown, _raw: unknown, v: number | null) =>
+      v == null || v === 0 ? '—' : formatTokensPerSecond(v),
+  },
+]
+
+const ttftSeries = [
+  {
+    label: 'TTFT (ms)',
+    stroke: '#34c759',
+    width: 2,
+    fill: 'rgba(52, 199, 89, 0.12)',
+    value: (_u: unknown, _raw: unknown, v: number | null) =>
+      v == null || v === 0 ? '—' : formatDuration(v),
+  },
+]
+
+function totalSeries(metric: Metric) {
+  if (metric === 'cost') return costSeries
+  if (metric === 'speed') return speedSeries
+  if (metric === 'ttft') return ttftSeries
+  return tokenSeries
+}
+
+function metricFormatter(metric: Metric) {
+  if (metric === 'cost') return (v: number) => formatRMB(v)
+  if (metric === 'speed') return (v: number) => formatTokensPerSecond(v)
+  if (metric === 'ttft') return (v: number) => formatDuration(v)
+  return (v: number) => (Math.abs(v) >= 1000 ? formatCount(v) : String(Math.round(v)))
+}
+
 function buildData(rows: ByDayRow[], metric: Metric) {
   const days = rows.map((r) => r.day)
   if (metric === 'cost') return toTimeAlignedData(days, [rows.map((r) => r.cost)])
@@ -256,6 +286,32 @@ type ModelSeries = {
   }[]
 }
 
+type TimingBucket = {
+  speedOutputTokens: number
+  speedDurationMs: number
+  speedSampleCount: number
+  ttftSumMs: number
+  ttftSampleCount: number
+  totalDurationMs: number
+}
+
+function emptyTimingBucket(): TimingBucket {
+  return {
+    speedOutputTokens: 0,
+    speedDurationMs: 0,
+    speedSampleCount: 0,
+    ttftSumMs: 0,
+    ttftSampleCount: 0,
+    totalDurationMs: 0,
+  }
+}
+
+function bucketValue(metric: Metric, b: TimingBucket): number {
+  if (metric === 'speed') return b.speedDurationMs > 0 ? (b.speedOutputTokens / b.speedDurationMs) * 1000 : 0
+  if (metric === 'ttft') return b.ttftSampleCount > 0 ? b.ttftSumMs / b.ttftSampleCount : 0
+  return 0
+}
+
 /**
  * 把「日 × model_id」行按模型组展开成多条 y 序列。
  * 组 key 走 resolveGroupKey（尊重标记/改名），按区间总量降序取 Top N，
@@ -269,16 +325,26 @@ function buildModelSeries(
   marks: MarkMap,
 ): ModelSeries {
   const dayIdx = new Map<string, number>(days.map((d, i) => [d, i]))
-  // 组 key → y 序列（长度 = 天数）与区间总量
-  const seriesMap = new Map<string, { ys: number[]; total: number }>()
+  // 组 key → 每日 bucket 序列（长度 = 天数）与区间总量
+  const seriesMap = new Map<string, { ys: TimingBucket[]; total: number; tokenTotal: number }>()
   for (const r of rows) {
     const key = resolveGroupKey(r.modelId, 'name', marks)
     let entry = seriesMap.get(key)
     if (!entry) {
-      entry = { ys: new Array(days.length).fill(0), total: 0 }
+      entry = { ys: Array.from({ length: days.length }, emptyTimingBucket), total: 0, tokenTotal: 0 }
       seriesMap.set(key, entry)
     }
-    const v =
+    const di = dayIdx.get(r.day)
+    if (di == null) continue
+    const bucket = entry.ys[di] ?? emptyTimingBucket()
+    bucket.speedOutputTokens += r.speedOutputTokens
+    bucket.speedDurationMs += r.speedDurationMs
+    bucket.speedSampleCount += r.speedSampleCount
+    bucket.ttftSumMs += r.ttftSumMs
+    bucket.ttftSampleCount += r.ttftSampleCount
+    bucket.totalDurationMs += r.totalDurationMs
+    entry.ys[di] = bucket
+    const tokenValue =
       metric === 'token'
         ? r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens
         : costFor(r.modelId, {
@@ -288,13 +354,15 @@ function buildModelSeries(
             cacheReadTokens: r.cacheReadTokens,
             cacheCreationTokens: r.cacheCreationTokens,
           })
-    const di = dayIdx.get(r.day)
-    if (di == null) continue
-    entry.ys[di] = (entry.ys[di] ?? 0) + v
-    entry.total += v
+    entry.total += metric === 'speed' || metric === 'ttft' ? 0 : tokenValue
+    entry.tokenTotal += r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens
   }
 
-  const sorted = [...seriesMap.entries()].sort((a, b) => b[1].total - a[1].total)
+  // 排序：speed/ttft 按 token 总量降序（没有 token 时按对应 metric 总值）
+  const sorted = [...seriesMap.entries()].sort((a, b) => {
+    if (metric === 'speed' || metric === 'ttft') return b[1].tokenTotal - a[1].tokenTotal
+    return b[1].total - a[1].total
+  })
   const limit = topN === 'all' ? sorted.length : Number(topN)
   const head = sorted.slice(0, limit)
   const tail = sorted.slice(limit)
@@ -311,15 +379,20 @@ function buildModelSeries(
       paths: modelPaths,
       value: (_u, _raw, v) => {
         if (v == null) return '—'
-        return metric === 'token' ? formatCount(v) : formatRMB(v)
+        if (metric === 'token') return formatCount(v)
+        if (metric === 'cost') return formatRMB(v)
+        if (metric === 'speed') return formatTokensPerSecond(v)
+        return formatDuration(v)
       },
     })
-    ys.push(entry.ys)
+    ys.push(entry.ys.map((b) => bucketValue(metric, b)))
   }
   if (tail.length > 0) {
     const merged = new Array<number>(days.length).fill(0)
     for (const [, entry] of tail) {
-      for (let i = 0; i < merged.length; i++) merged[i] = (merged[i] ?? 0) + (entry.ys[i] ?? 0)
+      for (let i = 0; i < merged.length; i++) {
+        merged[i] = (merged[i] ?? 0) + bucketValue(metric, entry.ys[i] ?? emptyTimingBucket())
+      }
     }
     defs.push({
       label: `其他（${tail.length} 个模型）`,
@@ -328,7 +401,10 @@ function buildModelSeries(
       paths: modelPaths,
       value: (_u, _raw, v) => {
         if (v == null) return '—'
-        return metric === 'token' ? formatCount(v) : formatRMB(v)
+        if (metric === 'token') return formatCount(v)
+        if (metric === 'cost') return formatRMB(v)
+        if (metric === 'speed') return formatTokensPerSecond(v)
+        return formatDuration(v)
       },
     })
     ys.push(merged)

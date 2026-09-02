@@ -4,6 +4,9 @@ import { useDb } from './db/client.ts'
 import { ROUTES, useRoute, type RouteName } from './lib/router.ts'
 import { formatFileSize } from './lib/format.ts'
 import { OverviewPage } from './pages/overview.tsx'
+import { ByProviderPage } from './pages/by-provider.tsx'
+import { ProviderDetailPage } from './pages/provider-detail.tsx'
+import { ProviderModelDetailPage } from './pages/provider-model-detail.tsx'
 import { ByModelPage } from './pages/by-model.tsx'
 import { ModelDetailPage } from './pages/model-detail.tsx'
 import { ByDayPage } from './pages/by-day.tsx'
@@ -232,6 +235,16 @@ function PageHost({
   switch (route) {
     case 'overview':
       return <OverviewPage db={state.db} />
+    case 'by-provider':
+      return <ByProviderPage db={state.db} />
+    case 'provider':
+      return <ProviderDetailPage db={state.db} providerId={param} />
+    case 'provider-model': {
+      const [providerId, modelId] = param.split('/')
+      return providerId && modelId ? (
+        <ProviderModelDetailPage db={state.db} providerId={providerId} modelId={modelId} />
+      ) : null
+    }
     case 'by-model':
       return <ByModelPage db={state.db} />
     case 'model':
