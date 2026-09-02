@@ -153,7 +153,7 @@ export function ProviderDetailPage({
               <UPlotChart
                 data={[
                   topModels.map((_, i) => i),
-                  topModels.map((r) => r.avgOutputSpeed ?? 0),
+                  topModels.map((r) => r.avgOutputSpeed),
                 ]}
                 time={false}
                 height={200}

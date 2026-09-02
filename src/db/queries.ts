@@ -74,6 +74,17 @@ function modelIdClause(bind: unknown[], modelIds: readonly string[]): string {
   return `AND model_id IN (${placeholders})`
 }
 
+/**
+ * 纯解码口径的速度样本谓词：输出速度不含「等首个 token」的时间，
+ * 分母用 duration_ms - time_to_first_token_ms。TTFT 须有效（非空、>=0、< 总时长）
+ * 才能参与；speedOutputTokens / speedDurationMs / speedSampleCount 三处
+ * 必须使用同一谓词，保证分子分母覆盖同一批行。
+ * 速度 = Σoutput_tokens / Σ(duration_ms - ttft) × 1000。
+ */
+const SPEED_VALID =
+  'duration_ms > 0 AND output_tokens > 0 AND time_to_first_token_ms IS NOT NULL ' +
+  'AND time_to_first_token_ms >= 0 AND time_to_first_token_ms < duration_ms'
+
 export const QUERIES = {
   overview(range: Range): ParamQuery {
     const tzOffsetMs = timezoneOffsetMs()
@@ -95,9 +106,9 @@ export const QUERIES = {
         COUNT(DISTINCT strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch'))       AS activeDays,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 THEN duration_ms ELSE 0 END)            AS totalDurationMs,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 THEN 1 ELSE 0 END)                       AS durationSampleCount,
-        SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-        SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END)    AS speedDurationMs,
+        SUM(CASE WHEN status='completed' AND ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN status='completed' AND ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN status='completed' AND ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END)    AS speedDurationMs,
         SUM(CASE WHEN status='completed' AND time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
         SUM(CASE WHEN status='completed' AND time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END)  AS ttftSampleCount
       FROM model_usage
@@ -144,9 +155,9 @@ export const QUERIES = {
           SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
           SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
           SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+          SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+          SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+          SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
           SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
           SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
         FROM model_usage
@@ -204,9 +215,9 @@ export const QUERIES = {
         SUM(reasoning_tokens)                               AS reasoningTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
         SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
@@ -264,9 +275,9 @@ export const QUERIES = {
         SUM(computed_total_tokens)                                     AS totalTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END)       AS totalDurationMs,
         SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END)                AS durationSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
@@ -293,9 +304,9 @@ export const QUERIES = {
         SUM(cache_creation_input_tokens)                    AS cacheCreationTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
         SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
@@ -307,9 +318,9 @@ export const QUERIES = {
   },
 
   /**
-   * 速度趋势：按「本地小时桶 × model_id」聚合速度样本。
-   * 只取参与速度计算的行（completed + duration_ms>0 + output_tokens>0），
+   * 速度趋势：按「本地小时桶 × model_id」聚合速度样本（纯解码口径，见 SPEED_VALID）。
    * 日/周粒度由页面在前端折叠小时桶得到，一条查询服务三种粒度。
+   * ttftSumMs/ttftSampleCount 给页面的「平均首字等待」KPI 用。
    */
   speedTrend(range: Range): ParamQuery {
     const tzOffsetMs = timezoneOffsetMs()
@@ -317,9 +328,11 @@ export const QUERIES = {
       SELECT
         strftime('%Y-%m-%dT%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS bucket,
         model_id                                            AS modelId,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount
+        SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)}
       GROUP BY bucket, model_id
@@ -346,9 +359,9 @@ export const QUERIES = {
           SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
           SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
           SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+          SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+          SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+          SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
           SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
           SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
         FROM model_usage
@@ -405,9 +418,9 @@ export const QUERIES = {
           SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
           SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
           SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-          SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+          SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+          SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+          SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
           SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
           SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
         FROM model_usage
@@ -462,9 +475,9 @@ export const QUERIES = {
         SUM(cache_creation_input_tokens)                    AS cacheCreationTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
         SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
@@ -492,9 +505,9 @@ export const QUERIES = {
         SUM(computed_total_tokens)                                     AS totalTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END)       AS totalDurationMs,
         SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END)                AS durationSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
-        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN ${SPEED_VALID} THEN 1 ELSE 0 END) AS speedSampleCount,
+        SUM(CASE WHEN ${SPEED_VALID} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN ${SPEED_VALID} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
         SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
@@ -888,7 +901,7 @@ export function shapeBySessionByModel(
   }))
 }
 
-/** speedTrend 的列序：bucket, modelId, speedOutputTokens, speedDurationMs, speedSampleCount */
+/** speedTrend 的列序：bucket, modelId, speedOutputTokens, speedDurationMs, speedSampleCount, ttftSumMs, ttftSampleCount */
 export function shapeSpeedTrend(r: WorkerExecResult): SpeedTrendRow[] {
   return r.rows.map((row) => ({
     bucket: String(row[0] ?? ''),
@@ -896,6 +909,8 @@ export function shapeSpeedTrend(r: WorkerExecResult): SpeedTrendRow[] {
     speedOutputTokens: toNumber(row[2]),
     speedDurationMs: toNumber(row[3]),
     speedSampleCount: toNumber(row[4]),
+    ttftSumMs: toNumber(row[5]),
+    ttftSampleCount: toNumber(row[6]),
   }))
 }
 

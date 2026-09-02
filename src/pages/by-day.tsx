@@ -398,7 +398,7 @@ function buildModelSeries(
     ys.push(entry.ys.map((b) => bucketValue(metric, b)))
   }
   if (tail.length > 0) {
-    // 先累加原始聚合量再算值：速度必须加权（Σout/Σdur），不能把各组 tok/s 直接相加
+    // 先累加原始聚合量再算值：速度必须加权（Σ输出/Σ解码时长），不能把各组 tok/s 直接相加
     const merged = Array.from({ length: days.length }, emptyTimingBucket)
     for (const [, entry] of tail) {
       for (let i = 0; i < merged.length; i++) {

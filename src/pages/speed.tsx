@@ -17,7 +17,6 @@ import {
 import { useRange } from '../lib/range-context.tsx'
 import { displayNameOf } from '../lib/pricing.ts'
 import {
-  formatCount,
   formatDuration,
   formatFull,
   formatTokensPerSecond,
@@ -79,8 +78,9 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
         <div>
           <h1 class="page__title">输出速度</h1>
           <p class="page__subtitle">
-            各模型输出速度趋势（同一张图，悬浮查看数值，图例可点击隐藏/显示单条线）。
-            速度 = 输出 token ÷ 生成时长，按 token 加权；仅统计 completed 且 duration &gt; 0、output &gt; 0 的调用，无样本时段断线
+            各模型解码速度趋势（同一张图，悬浮查看数值，图例可点击隐藏/显示单条线）。
+            解码速度 = 输出 token ÷（总时长 − 首 token 等待），按 token 加权，不含等首字的时间；
+            仅统计记录了有效首字时间的调用，无样本时段断线
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -110,16 +110,26 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
         {state.kind === 'loading' && <div class="app-banner">加载中…</div>}
         {state.kind === 'error' && <div class="app-banner app-banner--error">{state.error}</div>}
         {state.kind === 'ok' && state.data.length === 0 && (
-          <div class="app-banner">所选时间窗内没有可计算速度的调用（需要 completed 且 duration &gt; 0、output &gt; 0）</div>
+          <div class="app-banner">所选时间窗内没有可计算解码速度的调用（需要 completed、时长 &gt; 0、有输出且记录了有效首字时间）</div>
         )}
         {state.kind === 'ok' && state.data.length > 0 && kpis && (
           <>
             <div class="kpi-grid kpi-grid--3" style={{ marginBottom: 12 }}>
               <KpiCard
-                label="区间输出速度"
+                label="区间解码速度"
                 tone="orange"
                 value={kpis.overall == null ? '—' : formatTokensPerSecond(kpis.overall)}
                 sub={`${formatFull(kpis.samples)} 次有效样本`}
+              />
+              <KpiCard
+                label="平均首字等待"
+                tone="blue"
+                value={kpis.ttftAvg == null ? '—' : formatDuration(kpis.ttftAvg)}
+                sub={
+                  kpis.ttftSamples === 0
+                    ? '当前数据未记录首字时间'
+                    : `${formatFull(kpis.ttftSamples)} 次 TTFT 样本`
+                }
               />
               <KpiCard
                 label="最快模型"
@@ -130,12 +140,6 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
                     ? `${formatTokensPerSecond(kpis.fastest.speed)} · ${formatFull(kpis.fastest.n)} 次样本`
                     : '有效样本不足 10 次的模型不参与'
                 }
-              />
-              <KpiCard
-                label="输出 token 总量"
-                tone="default"
-                value={formatCount(kpis.outputTokens)}
-                sub={`有效生成时长 ${formatDuration(kpis.durationMs)}`}
               />
             </div>
             {series && (
@@ -297,12 +301,13 @@ function buildSpeedSeries(
 }
 
 type SpeedKpis = {
-  /** 区间整体加权速度（tok/s）；无有效样本时为 null */
+  /** 区间整体加权解码速度（tok/s）；无有效样本时为 null */
   overall: number | null
-  outputTokens: number
-  durationMs: number
   samples: number
-  /** 样本 ≥ 10 次的组里加权速度最高者 */
+  /** 全区间平均首字等待（ms）；无 TTFT 样本时为 null */
+  ttftAvg: number | null
+  ttftSamples: number
+  /** 样本 ≥ 10 次的组里解码速度最高者 */
   fastest: { key: string; speed: number; n: number } | null
 }
 
@@ -310,11 +315,15 @@ function buildKpis(rows: readonly SpeedTrendRow[], marks: MarkMap): SpeedKpis {
   let outputTokens = 0
   let durationMs = 0
   let samples = 0
+  let ttftSumMs = 0
+  let ttftSamples = 0
   const byGroup = new Map<string, SpeedBucket>()
   for (const r of rows) {
     outputTokens += r.speedOutputTokens
     durationMs += r.speedDurationMs
     samples += r.speedSampleCount
+    ttftSumMs += r.ttftSumMs
+    ttftSamples += r.ttftSampleCount
     const gk = resolveGroupKey(r.modelId, 'name', marks)
     const b = byGroup.get(gk)
     if (b) {
@@ -339,9 +348,9 @@ function buildKpis(rows: readonly SpeedTrendRow[], marks: MarkMap): SpeedKpis {
   }
   return {
     overall: durationMs > 0 ? (outputTokens / durationMs) * 1000 : null,
-    outputTokens,
-    durationMs,
     samples,
+    ttftAvg: ttftSamples > 0 ? ttftSumMs / ttftSamples : null,
+    ttftSamples,
     fastest,
   }
 }

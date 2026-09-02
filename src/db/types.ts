@@ -4,13 +4,14 @@
 
 /** 输出速度与首 token 延迟的派生指标 */
 export type TimingStats = {
-  /** output_tokens / duration_ms * 1000（tok/s）；无有效样本时为 null */
+  /** 解码速度 = output_tokens / (duration_ms − TTFT) × 1000（tok/s）；无有效样本时为 null。
+   *  不含「等首个 token」的等待时间；仅统计记录了有效 TTFT 的调用 */
   avgOutputSpeed: number | null
   /** time_to_first_token_ms 平均值（ms）；无有效样本时为 null */
   avgTtftMs: number | null
   /** duration_ms 平均值（ms）；无有效样本时为 null */
   avgDurationMs: number | null
-  /** 参与速度计算的调用数 */
+  /** 参与速度计算的调用数（须含有效 TTFT） */
   speedSampleCount: number
   /** 参与 TTFT 计算的调用数 */
   ttftSampleCount: number
@@ -20,7 +21,7 @@ export type TimingStats = {
 export type TimingAggregates = TimingStats & {
   /** 参与速度计算的 output_tokens 累加 */
   speedOutputTokens: number
-  /** 参与速度计算的 duration_ms 累加（ms） */
+  /** 参与速度计算的解码时长累加（duration_ms − TTFT，ms） */
   speedDurationMs: number
   /** 参与 TTFT 计算的 time_to_first_token_ms 累加（ms） */
   ttftSumMs: number
@@ -131,7 +132,8 @@ export type ByDayByModelRow = TimingAggregates & {
   cacheCreationTokens: number
 }
 
-/** 速度趋势页的「本地小时桶 × model_id」行；页面按 日/周 粒度在前端再折叠 */
+/** 速度趋势页的「本地小时桶 × model_id」行；页面按 日/周 粒度在前端再折叠。
+ *  速度字段为纯解码口径（见 queries.ts SPEED_VALID） */
 export type SpeedTrendRow = {
   /** 本地时区小时桶，格式 'YYYY-MM-DDTHH' */
   bucket: string
@@ -139,6 +141,8 @@ export type SpeedTrendRow = {
   speedOutputTokens: number
   speedDurationMs: number
   speedSampleCount: number
+  ttftSumMs: number
+  ttftSampleCount: number
 }
 
 export type BySessionByModelRow = {
