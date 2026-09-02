@@ -4,6 +4,7 @@
 # - 自定义域名走 Worker Custom Domains：zone 在同一账号时会【自动创建 DNS 记录】，
 #   无需手动验证——这是它相对 Pages 自定义域名的关键差异
 name = "zcodestats"
+account_id = "23ec159df1a5831b2b2d48ec1a7073d4"
 main = "worker/index.js"
 # 纯静态、无运行时特性依赖；钉死是为了让旧版本地 workerd 也能 `wrangler dev`
 compatibility_date = "2026-08-08"
