@@ -346,6 +346,7 @@ export function resolveGroups(
         ttftSumMs: 0,
         ttftSampleCount: 0,
         totalDurationMs: 0,
+        durationSampleCount: 0,
         avgOutputSpeed: null,
         avgTtftMs: null,
         avgDurationMs: null,
@@ -369,6 +370,7 @@ export function resolveGroups(
     g.ttftSumMs += r.ttftSumMs
     g.ttftSampleCount += r.ttftSampleCount
     g.totalDurationMs += r.totalDurationMs
+    g.durationSampleCount += r.durationSampleCount
     // 成本：按底层 model_id 各自计价；pricing 已感知 marks
     g.cost += costFor(id, r)
   }
@@ -380,7 +382,7 @@ export function resolveGroups(
     g.share = grandTotal > 0 ? g.totalTokens / grandTotal : 0
     g.avgOutputSpeed = g.speedDurationMs > 0 ? (g.speedOutputTokens / g.speedDurationMs) * 1000 : null
     g.avgTtftMs = g.ttftSampleCount > 0 ? g.ttftSumMs / g.ttftSampleCount : null
-    g.avgDurationMs = g.speedSampleCount > 0 ? g.totalDurationMs / g.speedSampleCount : null
+    g.avgDurationMs = g.durationSampleCount > 0 ? g.totalDurationMs / g.durationSampleCount : null
     // 展示主标题：识别出的组用价目表 key 的可读名（如 "MiniMax M3"），未识别回退到 groupKey
     if (g.recognized) {
       const firstId = g.modelIds[0] ?? g.groupKey

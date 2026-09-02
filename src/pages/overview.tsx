@@ -137,7 +137,7 @@ function KpiGrid(props: { data?: OverviewKpis; errorRate?: number; loading?: boo
         tone="green"
         loading={loading}
         value={data ? (data.avgTtftMs != null ? formatDuration(data.avgTtftMs) : '—') : ''}
-        sub={data ? `${formatFull(data.ttftSampleCount)} 次有效样本` : ''}
+        sub={data ? (data.ttftSampleCount === 0 ? '当前数据未记录 time_to_first_token_ms' : `${formatFull(data.ttftSampleCount)} 次有效样本`) : ''}
       />
       <KpiCard
         label="平均调用耗时"

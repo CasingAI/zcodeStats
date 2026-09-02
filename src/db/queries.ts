@@ -57,6 +57,14 @@ function rangeClause(range: Range): string {
   return `AND started_at >= ${Date.now() - ms}`
 }
 
+/** 将 UTC epoch ms 偏移到本地时区 epoch ms 的毫秒数。
+ *  用于 strftime('%H'/'%w') 取本地小时/星期。东八区 getTimezoneOffset=-480，返回 -28_800_000，
+ *  SQL 中用 (started_at - offsetMs)/1000 即可得到本地时间。
+ */
+function timezoneOffsetMs(): number {
+  return new Date().getTimezoneOffset() * 60 * 1000
+}
+
 /** 追加 model_id IN (...) 谓词，并把绑定值推进 bind。 */
 function modelIdClause(bind: unknown[], modelIds: readonly string[]): string {
   if (!modelIds || modelIds.length === 0) return ''
@@ -84,6 +92,7 @@ export const QUERIES = {
         MAX(started_at)                                                          AS lastSeen,
         COUNT(DISTINCT strftime('%Y-%m-%d', started_at/1000, 'unixepoch'))       AS activeDays,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 THEN duration_ms ELSE 0 END)            AS totalDurationMs,
+        SUM(CASE WHEN status='completed' AND duration_ms > 0 THEN 1 ELSE 0 END)                       AS durationSampleCount,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END)    AS speedDurationMs,
@@ -132,6 +141,7 @@ export const QUERIES = {
           SUM(cache_creation_input_tokens) AS cacheCreationTokens,
           SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
           SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+          SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -160,6 +170,7 @@ export const QUERIES = {
              THEN CAST(agg.totalTokens AS REAL) / total.s
              ELSE 0 END          AS share,
         agg.totalDurationMs       AS totalDurationMs,
+        agg.durationSampleCount   AS durationSampleCount,
         agg.speedSampleCount      AS speedSampleCount,
         agg.speedOutputTokens     AS speedOutputTokens,
         agg.speedDurationMs       AS speedDurationMs,
@@ -189,6 +200,7 @@ export const QUERIES = {
              ELSE 0 END                                     AS cacheHitRate,
         SUM(reasoning_tokens)                               AS reasoningTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -240,13 +252,15 @@ export const QUERIES = {
 
   byHour(range: Range, modelIds: readonly string[] = []): ParamQuery {
     const bind: unknown[] = []
+    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        CAST(strftime('%w', started_at/1000, 'unixepoch') AS INTEGER) AS weekday,
-        CAST(strftime('%H', started_at/1000, 'unixepoch') AS INTEGER) AS hour,
+        CAST(strftime('%w', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS INTEGER) AS weekday,
+        CAST(strftime('%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS INTEGER) AS hour,
         COUNT(*)                                                       AS calls,
         SUM(computed_total_tokens)                                     AS totalTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END)       AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END)                AS durationSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -274,6 +288,7 @@ export const QUERIES = {
         SUM(cache_read_input_tokens)                        AS cacheReadTokens,
         SUM(cache_creation_input_tokens)                    AS cacheCreationTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -304,6 +319,7 @@ export const QUERIES = {
           SUM(cache_creation_input_tokens) AS cacheCreationTokens,
           SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
           SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+          SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -331,6 +347,7 @@ export const QUERIES = {
              THEN CAST(agg.totalTokens AS REAL) / total.s
              ELSE 0 END          AS share,
         agg.totalDurationMs       AS totalDurationMs,
+        agg.durationSampleCount   AS durationSampleCount,
         agg.speedSampleCount      AS speedSampleCount,
         agg.speedOutputTokens     AS speedOutputTokens,
         agg.speedDurationMs       AS speedDurationMs,
@@ -361,6 +378,7 @@ export const QUERIES = {
           SUM(cache_creation_input_tokens) AS cacheCreationTokens,
           SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
           SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+          SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
           SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -389,6 +407,7 @@ export const QUERIES = {
              THEN CAST(agg.totalTokens AS REAL) / total.s
              ELSE 0 END          AS share,
         agg.totalDurationMs       AS totalDurationMs,
+        agg.durationSampleCount   AS durationSampleCount,
         agg.speedSampleCount      AS speedSampleCount,
         agg.speedOutputTokens     AS speedOutputTokens,
         agg.speedDurationMs       AS speedDurationMs,
@@ -415,6 +434,7 @@ export const QUERIES = {
         SUM(cache_read_input_tokens)                        AS cacheReadTokens,
         SUM(cache_creation_input_tokens)                    AS cacheCreationTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END) AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END) AS durationSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -436,13 +456,15 @@ export const QUERIES = {
    */
   byHourByProviderModel(range: Range, providerId: string, modelId: string): ParamQuery {
     const bind: unknown[] = [providerId, modelId]
+    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        CAST(strftime('%w', started_at/1000, 'unixepoch') AS INTEGER) AS weekday,
-        CAST(strftime('%H', started_at/1000, 'unixepoch') AS INTEGER) AS hour,
+        CAST(strftime('%w', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS INTEGER) AS weekday,
+        CAST(strftime('%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS INTEGER) AS hour,
         COUNT(*)                                                       AS calls,
         SUM(computed_total_tokens)                                     AS totalTokens,
         SUM(CASE WHEN duration_ms > 0 THEN duration_ms ELSE 0 END)       AS totalDurationMs,
+        SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END)                AS durationSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
@@ -635,6 +657,7 @@ function computeTimingAggregates(
   ttftSumMs: number,
   ttftSampleCount: number,
   totalDurationMs: number,
+  durationSampleCount: number,
 ): TimingAggregates {
   return {
     speedOutputTokens,
@@ -643,9 +666,10 @@ function computeTimingAggregates(
     ttftSumMs,
     ttftSampleCount,
     totalDurationMs,
+    durationSampleCount,
     avgOutputSpeed: speedDurationMs > 0 ? (speedOutputTokens / speedDurationMs) * 1000 : null,
     avgTtftMs: ttftSampleCount > 0 ? ttftSumMs / ttftSampleCount : null,
-    avgDurationMs: speedSampleCount > 0 ? totalDurationMs / speedSampleCount : null,
+    avgDurationMs: durationSampleCount > 0 ? totalDurationMs / durationSampleCount : null,
   }
 }
 
@@ -674,6 +698,7 @@ export function shapeOverview(
     toNumber(m[19]),
     toNumber(m[20]),
     toNumber(m[14]),
+    toNumber(m[15]),
   )
   return {
     totalTokens,
@@ -723,6 +748,7 @@ export function shapeByModel(
       toNumber(row[17]),
       toNumber(row[18]),
       toNumber(row[12]),
+      toNumber(row[13]),
     )
     return {
       modelId,
@@ -750,12 +776,13 @@ export function shapeByDay(
 ): ByDayRow[] {
   return r.rows.map((row) => {
     const timing = computeTimingAggregates(
-      toNumber(row[12]),
       toNumber(row[13]),
-      toNumber(row[11]),
       toNumber(row[14]),
+      toNumber(row[12]),
       toNumber(row[15]),
+      toNumber(row[16]),
       toNumber(row[10]),
+      toNumber(row[11]),
     )
     return {
       day: String(row[0] ?? ''),
@@ -799,12 +826,13 @@ export function shapeByDayByModel(
 ): ByDayByModelRow[] {
   return r.rows.map((row) => {
     const timing = computeTimingAggregates(
-      toNumber(row[9]),
       toNumber(row[10]),
-      toNumber(row[8]),
       toNumber(row[11]),
+      toNumber(row[9]),
       toNumber(row[12]),
+      toNumber(row[13]),
       toNumber(row[7]),
+      toNumber(row[8]),
     )
     return {
       day: String(row[0] ?? ''),
@@ -879,9 +907,10 @@ export function aggregateCostBySession(
 
 export function shapeByHour(r: WorkerExecResult): ByHourGrid {
   const cells = r.rows.map((row) => {
-    const speedDurationMs = toNumber(row[6])
-    const speedSampleCount = toNumber(row[5])
-    const ttftSampleCount = toNumber(row[8])
+    const durationSampleCount = toNumber(row[5])
+    const speedDurationMs = toNumber(row[8])
+    const speedSampleCount = toNumber(row[6])
+    const ttftSampleCount = toNumber(row[9])
     return {
       weekday: toNumber(row[0]),
       hour: toNumber(row[1]),
@@ -890,12 +919,13 @@ export function shapeByHour(r: WorkerExecResult): ByHourGrid {
       speedOutputTokens: toNumber(row[7]),
       speedDurationMs,
       speedSampleCount,
-      ttftSumMs: toNumber(row[9]),
+      ttftSumMs: toNumber(row[10]),
       ttftSampleCount,
       totalDurationMs: toNumber(row[4]),
+      durationSampleCount,
       avgOutputSpeed: speedDurationMs > 0 ? (toNumber(row[7]) / speedDurationMs) * 1000 : null,
-      avgTtftMs: ttftSampleCount > 0 ? toNumber(row[9]) / ttftSampleCount : null,
-      avgDurationMs: speedSampleCount > 0 ? toNumber(row[4]) / speedSampleCount : null,
+      avgTtftMs: ttftSampleCount > 0 ? toNumber(row[10]) / ttftSampleCount : null,
+      avgDurationMs: durationSampleCount > 0 ? toNumber(row[4]) / durationSampleCount : null,
     }
   })
   const maxTokens = cells.reduce((m, c) => (c.totalTokens > m ? c.totalTokens : m), 0)
@@ -911,12 +941,13 @@ export function shapeByProvider(r: WorkerExecResult): ByProviderRow[] {
     const cacheCreationTokens = toNumber(row[8])
     const providerId = String(row[0] ?? '?')
     const timing = computeTimingAggregates(
-      toNumber(row[13]),
       toNumber(row[14]),
-      toNumber(row[12]),
       toNumber(row[15]),
+      toNumber(row[13]),
       toNumber(row[16]),
+      toNumber(row[17]),
       toNumber(row[11]),
+      toNumber(row[12]),
     )
     return {
       providerId,
@@ -946,12 +977,13 @@ export function shapeByProviderModel(r: WorkerExecResult): ByProviderModelRow[] 
     const providerId = String(row[0] ?? '?')
     const modelId = String(row[1] ?? '')
     const timing = computeTimingAggregates(
-      toNumber(row[14]),
       toNumber(row[15]),
-      toNumber(row[13]),
       toNumber(row[16]),
+      toNumber(row[14]),
       toNumber(row[17]),
+      toNumber(row[18]),
       toNumber(row[12]),
+      toNumber(row[13]),
     )
     return {
       providerId,
@@ -981,12 +1013,13 @@ export function shapeByProviderModel(r: WorkerExecResult): ByProviderModelRow[] 
 export function shapeByDayByProviderModel(r: WorkerExecResult): ByDayRow[] {
   return r.rows.map((row) => {
     const timing = computeTimingAggregates(
-      toNumber(row[8]),
       toNumber(row[9]),
-      toNumber(row[7]),
       toNumber(row[10]),
+      toNumber(row[8]),
       toNumber(row[11]),
+      toNumber(row[12]),
       toNumber(row[6]),
+      toNumber(row[7]),
     )
     return {
       day: String(row[0] ?? ''),

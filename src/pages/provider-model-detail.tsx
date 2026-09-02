@@ -44,6 +44,7 @@ type ProviderModelData = {
   avgDurationMs: number | null
   speedSampleCount: number
   ttftSampleCount: number
+  durationSampleCount: number
   daily: ByDayRow[]
   hourSpeed: (number | null)[]
   hourTtft: (number | null)[]
@@ -88,6 +89,7 @@ export function ProviderModelDetailPage({
       let ttftSumMs = 0
       let ttftSampleCount = 0
       let totalDurationMs = 0
+      let durationSampleCount = 0
       // 按 hour 聚合获取总调用数与总 token
       for (const c of grid.cells) {
         calls += c.calls
@@ -105,6 +107,7 @@ export function ProviderModelDetailPage({
         ttftSumMs += r.ttftSumMs
         ttftSampleCount += r.ttftSampleCount
         totalDurationMs += r.totalDurationMs
+        durationSampleCount += r.durationSampleCount
       }
       errorCount = 0 // byDayByProviderModel 未返回 errorCount，暂缺
       const cacheHitRate =
@@ -140,9 +143,10 @@ export function ProviderModelDetailPage({
         }),
         avgOutputSpeed: speedDurationMs > 0 ? (speedOutputTokens / speedDurationMs) * 1000 : null,
         avgTtftMs: ttftSampleCount > 0 ? ttftSumMs / ttftSampleCount : null,
-        avgDurationMs: speedSampleCount > 0 ? totalDurationMs / speedSampleCount : null,
+        avgDurationMs: durationSampleCount > 0 ? totalDurationMs / durationSampleCount : null,
         speedSampleCount,
         ttftSampleCount,
+        durationSampleCount,
         daily,
         hourSpeed,
         hourTtft,
@@ -203,7 +207,11 @@ export function ProviderModelDetailPage({
                 state.data.avgTtftMs != null ? formatDuration(state.data.avgTtftMs) : '—'
               }
               tone="green"
-              sub={`${formatCount(state.data.ttftSampleCount)} 次有效样本`}
+              sub={
+                state.data.ttftSampleCount === 0
+                  ? '当前数据未记录 time_to_first_token_ms'
+                  : `${formatCount(state.data.ttftSampleCount)} 次有效样本`
+              }
             />
             <KpiCard
               label="大致成本"

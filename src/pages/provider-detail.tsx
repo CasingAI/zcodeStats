@@ -73,6 +73,7 @@ export function ProviderDetailPage({
         acc.ttftSumMs += r.ttftSumMs
         acc.ttftSampleCount += r.ttftSampleCount
         acc.totalDurationMs += r.totalDurationMs
+        acc.durationSampleCount += r.durationSampleCount
         acc.cost += r.cost
         return acc
       },
@@ -85,6 +86,7 @@ export function ProviderDetailPage({
         ttftSumMs: 0,
         ttftSampleCount: 0,
         totalDurationMs: 0,
+        durationSampleCount: 0,
         cost: 0,
       },
     )
@@ -136,6 +138,7 @@ export function ProviderDetailPage({
               label="平均 TTFT"
               value={kpi.ttftSampleCount > 0 ? formatDuration(kpi.ttftSumMs / kpi.ttftSampleCount) : '—'}
               tone="green"
+              sub={kpi.ttftSampleCount === 0 ? '当前数据未记录 time_to_first_token_ms' : `${formatCount(kpi.ttftSampleCount)} 次有效样本`}
             />
             <KpiCard
               label="大致成本"

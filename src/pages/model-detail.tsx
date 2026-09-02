@@ -69,6 +69,7 @@ type ModelDetailData = {
   avgDurationMs: number | null
   speedSampleCount: number
   ttftSampleCount: number
+  durationSampleCount: number
   daily: ByDayRow[]
   /** 0-23 时的 token 聚合（对 weekday 折叠） */
   hourTokens: number[]
@@ -134,6 +135,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
       let ttftSumMs = 0
       let ttftSampleCount = 0
       let totalDurationMs = 0
+      let durationSampleCount = 0
       // 按 modelId 各自累加 token：价格计算法区块需要拆分到每个 (matched, rule) bucket
       const perId = new Map<
         string,
@@ -159,6 +161,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
         ttftSumMs += r.ttftSumMs
         ttftSampleCount += r.ttftSampleCount
         totalDurationMs += r.totalDurationMs
+        durationSampleCount += r.durationSampleCount
         const cur = perId.get(r.modelId) ?? {
           input: 0,
           output: 0,
@@ -226,7 +229,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
 
       const avgOutputSpeed = speedDurationMs > 0 ? (speedOutputTokens / speedDurationMs) * 1000 : null
       const avgTtftMs = ttftSampleCount > 0 ? ttftSumMs / ttftSampleCount : null
-      const avgDurationMs = speedSampleCount > 0 ? totalDurationMs / speedSampleCount : null
+      const avgDurationMs = durationSampleCount > 0 ? totalDurationMs / durationSampleCount : null
       return {
         ids,
         calls,
@@ -239,6 +242,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
         avgDurationMs,
         speedSampleCount,
         ttftSampleCount,
+        durationSampleCount,
         daily,
         hourTokens,
         hourCalls,
@@ -307,12 +311,17 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
               label="平均 TTFT"
               value={state.data.avgTtftMs != null ? formatDuration(state.data.avgTtftMs) : '—'}
               tone="green"
-              sub={`${formatCount(state.data.ttftSampleCount)} 次有效样本`}
+              sub={
+                state.data.ttftSampleCount === 0
+                  ? '当前数据未记录 time_to_first_token_ms'
+                  : `${formatCount(state.data.ttftSampleCount)} 次有效样本`
+              }
             />
             <KpiCard
               label="平均耗时"
               value={state.data.avgDurationMs != null ? formatDuration(state.data.avgDurationMs) : '—'}
               tone="default"
+              sub={`${formatCount(state.data.durationSampleCount)} 次有效样本`}
             />
           </div>
 

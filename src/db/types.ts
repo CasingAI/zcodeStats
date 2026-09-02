@@ -26,6 +26,8 @@ export type TimingAggregates = TimingStats & {
   ttftSumMs: number
   /** 参与耗时计算的 duration_ms 累加（ms） */
   totalDurationMs: number
+  /** 参与耗时计算的调用数（duration_ms > 0 的 completed 调用） */
+  durationSampleCount: number
 }
 
 export type OverviewKpis = TimingAggregates & {
