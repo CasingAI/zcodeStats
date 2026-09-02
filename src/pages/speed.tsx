@@ -65,7 +65,9 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
     gran === 'hour'
       ? (v: number) => {
           const d = new Date(v * 1000)
-          return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`
+          const hh = String(d.getHours()).padStart(2, '0')
+          // \n 让 uPlot 把日期/时间画成两行（原生支持，见 axis lineGap）
+          return `${d.getMonth() + 1}/${d.getDate()}\n${hh}:00`
         }
       : (v: number) => {
           const d = new Date(v * 1000)
@@ -78,7 +80,7 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
         <div>
           <h1 class="page__title">输出速度</h1>
           <p class="page__subtitle">
-            各模型解码速度趋势（同一张图，悬浮查看数值，图例可点击隐藏/显示单条线）。
+            各模型解码速度趋势（同一张图，悬浮查看数值；图例可点击隐藏/显示单条线，悬停可聚焦该系列）。
             解码速度 = 输出 token ÷（总时长 − 首 token 等待），按 token 加权，不含等首字的时间；
             仅统计记录了有效首字时间的调用，无样本时段断线
           </p>

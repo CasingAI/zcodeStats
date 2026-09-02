@@ -182,6 +182,8 @@ export function UPlotChart({
         })),
       ] as Options['series'],
       legend: { show: true, live: false },
+      // 图例 hover 聚焦时非焦点系列的透明度（见下方图例 hover 绑定）
+      focus: { alpha: 0.15 },
       cursor: {
         // 不做框选缩放，悬浮只显示十字线与数值点
         drag: { x: false, y: false },
@@ -196,6 +198,30 @@ export function UPlotChart({
     const chart = new uPlot(opts, data as AlignedData, host)
     // tooltip 挂在 .u-over 上（与 canvas 同尺寸、覆盖其上的定位层）
     chart.over.appendChild(tip)
+
+    // 图例悬停聚焦：hover 某系列 → 其余系列按 opts.focus.alpha 减淡。
+    // uPlot 只提供 focus 渲染（focus: {alpha} + setSeries），图例 hover 交互需自行绑定。
+    const legendRows = Array.from(
+      chart.root.querySelectorAll<HTMLElement>('.u-legend .u-series'),
+    )
+    // 图例行不含 index 0（x 轴）；万一含 x 行则行数与 series 总数一致，偏移取 0
+    const rowOffset = legendRows.length === chart.series.length ? 0 : 1
+    const clearFocus = () => {
+      for (let i = 1; i < chart.series.length; i++) chart.setSeries(i, { focus: false }, false)
+    }
+    const offHover: (() => void)[] = legendRows.map((row, ri) => {
+      const si = ri + rowOffset
+      const onEnter = () => {
+        // 已被点击隐藏的系列不聚焦，否则整图只剩减淡的线
+        if (chart.series[si]?.show) chart.setSeries(si, { focus: true }, false)
+      }
+      row.addEventListener('mouseenter', onEnter)
+      row.addEventListener('mouseleave', clearFocus)
+      return () => {
+        row.removeEventListener('mouseenter', onEnter)
+        row.removeEventListener('mouseleave', clearFocus)
+      }
+    })
     chartRef.current = chart
 
     const ro = new ResizeObserver(() => {
@@ -206,6 +232,7 @@ export function UPlotChart({
 
     return () => {
       ro.disconnect()
+      for (const fn of offHover) fn()
       if (chartRef.current) {
         chartRef.current.destroy()
         chartRef.current = null
