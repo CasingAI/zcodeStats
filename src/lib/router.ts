@@ -12,6 +12,7 @@ export const ROUTES: readonly Route[] = [
   { path: 'by-provider', title: '按供应商', showInNav: true },
   { path: 'by-model', title: '按模型', showInNav: true },
   { path: 'by-day', title: '按日趋势', showInNav: true },
+  { path: 'speed', title: '输出速度', showInNav: true },
   { path: 'by-session', title: '按会话', showInNav: true },
   { path: 'by-hour', title: '按小时', showInNav: true },
   { path: 'by-tool', title: '按工具', showInNav: true },

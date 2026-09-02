@@ -292,6 +292,11 @@ type TimingBucket = {
   ttftSumMs: number
   ttftSampleCount: number
   totalDurationMs: number
+  durationSampleCount: number
+  /** 当日 token 总量（含 reasoning，与 computed_total_tokens 同口径） */
+  tokens: number
+  /** 当日成本 ¥（按底层 model_id 各自计价后累加） */
+  cost: number
 }
 
 function emptyTimingBucket(): TimingBucket {
@@ -302,19 +307,23 @@ function emptyTimingBucket(): TimingBucket {
     ttftSumMs: 0,
     ttftSampleCount: 0,
     totalDurationMs: 0,
+    durationSampleCount: 0,
+    tokens: 0,
+    cost: 0,
   }
 }
 
 function bucketValue(metric: Metric, b: TimingBucket): number | null {
   if (metric === 'speed') return b.speedDurationMs > 0 ? (b.speedOutputTokens / b.speedDurationMs) * 1000 : null
   if (metric === 'ttft') return b.ttftSampleCount > 0 ? b.ttftSumMs / b.ttftSampleCount : null
-  return 0
+  if (metric === 'cost') return b.cost
+  return b.tokens
 }
 
 /**
  * 把「日 × model_id」行按模型组展开成多条 y 序列。
  * 组 key 走 resolveGroupKey（尊重标记/改名），按区间总量降序取 Top N，
- * 未入选的模型合并为「其他」；日期轴与总量图共用，缺数据的天补 0。
+ * 未入选的模型合并为「其他」；缺数据的天：token/成本为 0，速度/TTFT 为 null（断线）。
  */
 function buildModelSeries(
   rows: readonly ByDayByModelRow[],
@@ -342,19 +351,21 @@ function buildModelSeries(
     bucket.ttftSumMs += r.ttftSumMs
     bucket.ttftSampleCount += r.ttftSampleCount
     bucket.totalDurationMs += r.totalDurationMs
+    const tokens =
+      r.inputTokens + r.outputTokens + r.reasoningTokens + r.cacheReadTokens + r.cacheCreationTokens
+    bucket.tokens += tokens
+    const cost = costFor(r.modelId, {
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      reasoningTokens: r.reasoningTokens,
+      cacheReadTokens: r.cacheReadTokens,
+      cacheCreationTokens: r.cacheCreationTokens,
+    })
+    bucket.cost += cost
     entry.ys[di] = bucket
-    const tokenValue =
-      metric === 'token'
-        ? r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens
-        : costFor(r.modelId, {
-            inputTokens: r.inputTokens,
-            outputTokens: r.outputTokens,
-            reasoningTokens: r.reasoningTokens,
-            cacheReadTokens: r.cacheReadTokens,
-            cacheCreationTokens: r.cacheCreationTokens,
-          })
-    entry.total += metric === 'speed' || metric === 'ttft' ? 0 : tokenValue
-    entry.tokenTotal += r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens
+    entry.tokenTotal += tokens
+    if (metric === 'token') entry.total += tokens
+    else if (metric === 'cost') entry.total += cost
   }
 
   // 排序：speed/ttft 按 token 总量降序（没有 token 时按对应 metric 总值）
@@ -387,12 +398,21 @@ function buildModelSeries(
     ys.push(entry.ys.map((b) => bucketValue(metric, b)))
   }
   if (tail.length > 0) {
-    const merged = new Array<number | null>(days.length).fill(null)
+    // 先累加原始聚合量再算值：速度必须加权（Σout/Σdur），不能把各组 tok/s 直接相加
+    const merged = Array.from({ length: days.length }, emptyTimingBucket)
     for (const [, entry] of tail) {
       for (let i = 0; i < merged.length; i++) {
-        const v = bucketValue(metric, entry.ys[i] ?? emptyTimingBucket())
-        if (v == null) continue
-        merged[i] = (merged[i] ?? 0) + v
+        const b = entry.ys[i] ?? emptyTimingBucket()
+        const m = merged[i]!
+        m.speedOutputTokens += b.speedOutputTokens
+        m.speedDurationMs += b.speedDurationMs
+        m.speedSampleCount += b.speedSampleCount
+        m.ttftSumMs += b.ttftSumMs
+        m.ttftSampleCount += b.ttftSampleCount
+        m.totalDurationMs += b.totalDurationMs
+        m.durationSampleCount += b.durationSampleCount
+        m.tokens += b.tokens
+        m.cost += b.cost
       }
     }
     defs.push({
@@ -408,7 +428,7 @@ function buildModelSeries(
         return formatDuration(v)
       },
     })
-    ys.push(merged)
+    ys.push(merged.map((b) => bucketValue(metric, b)))
   }
   return { days: [...days], ys, defs }
 }

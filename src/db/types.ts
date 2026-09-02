@@ -131,6 +131,16 @@ export type ByDayByModelRow = TimingAggregates & {
   cacheCreationTokens: number
 }
 
+/** 速度趋势页的「本地小时桶 × model_id」行；页面按 日/周 粒度在前端再折叠 */
+export type SpeedTrendRow = {
+  /** 本地时区小时桶，格式 'YYYY-MM-DDTHH' */
+  bucket: string
+  modelId: string
+  speedOutputTokens: number
+  speedDurationMs: number
+  speedSampleCount: number
+}
+
 export type BySessionByModelRow = {
   sessionId: string
   modelId: string

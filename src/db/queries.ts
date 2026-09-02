@@ -26,6 +26,7 @@ import type {
   ByToolRow,
   ErrorsOverview,
   OverviewKpis,
+  SpeedTrendRow,
   SqlExecResult,
   TimingAggregates,
 } from './types.ts'
@@ -301,6 +302,28 @@ export const QUERIES = {
       WHERE status='completed' ${rangeClause(range)}
       GROUP BY day, model_id
       ORDER BY day ASC
+    `
+    return { sql }
+  },
+
+  /**
+   * 速度趋势：按「本地小时桶 × model_id」聚合速度样本。
+   * 只取参与速度计算的行（completed + duration_ms>0 + output_tokens>0），
+   * 日/周粒度由页面在前端折叠小时桶得到，一条查询服务三种粒度。
+   */
+  speedTrend(range: Range): ParamQuery {
+    const tzOffsetMs = timezoneOffsetMs()
+    const sql = `
+      SELECT
+        strftime('%Y-%m-%dT%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS bucket,
+        model_id                                            AS modelId,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
+        SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount
+      FROM model_usage
+      WHERE status='completed' ${rangeClause(range)}
+      GROUP BY bucket, model_id
+      ORDER BY bucket ASC
     `
     return { sql }
   },
@@ -862,6 +885,17 @@ export function shapeBySessionByModel(
     reasoningTokens: toNumber(row[4]),
     cacheReadTokens: toNumber(row[5]),
     cacheCreationTokens: toNumber(row[6]),
+  }))
+}
+
+/** speedTrend 的列序：bucket, modelId, speedOutputTokens, speedDurationMs, speedSampleCount */
+export function shapeSpeedTrend(r: WorkerExecResult): SpeedTrendRow[] {
+  return r.rows.map((row) => ({
+    bucket: String(row[0] ?? ''),
+    modelId: String(row[1] ?? ''),
+    speedOutputTokens: toNumber(row[2]),
+    speedDurationMs: toNumber(row[3]),
+    speedSampleCount: toNumber(row[4]),
   }))
 }
 

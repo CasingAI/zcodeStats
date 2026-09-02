@@ -10,6 +10,7 @@ import { ProviderModelDetailPage } from './pages/provider-model-detail.tsx'
 import { ByModelPage } from './pages/by-model.tsx'
 import { ModelDetailPage } from './pages/model-detail.tsx'
 import { ByDayPage } from './pages/by-day.tsx'
+import { SpeedPage } from './pages/speed.tsx'
 import { BySessionPage } from './pages/by-session.tsx'
 import { ByHourPage } from './pages/by-hour.tsx'
 import { ByToolPage } from './pages/by-tool.tsx'
@@ -251,6 +252,8 @@ function PageHost({
       return <ModelDetailPage db={state.db} group={param} />
     case 'by-day':
       return <ByDayPage db={state.db} />
+    case 'speed':
+      return <SpeedPage db={state.db} />
     case 'by-session':
       return <BySessionPage db={state.db} />
     case 'by-hour':
