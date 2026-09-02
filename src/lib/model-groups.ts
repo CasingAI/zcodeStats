@@ -252,6 +252,7 @@ export function applyBuiltin(modelId: string): string | null {
     'minimax-m3:free': 'minimax-m3',
     'deepseek-latest': 'deepseek-v4-flash',
     'deepseek-latest:free': 'deepseek-v4-flash',
+    'cursor-grok-4.6-high': 'grok-4.6',
   }
   return BUILTIN_ALIASES_LC[modelId.toLowerCase()] ?? null
 }

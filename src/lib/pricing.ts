@@ -59,6 +59,7 @@ const TABLE: Record<string, ModelPrice> = {
   'claude-opus-4.8': { input: 36.0, output: 180.0, cacheInput: 3.6 },
   'claude-sonnet-4.6': { input: 21.6, output: 108.0, cacheInput: 2.16 },
   'claude-haiku-4.5': { input: 7.2, output: 36.0, cacheInput: 0.72 },
+  'composer-2.5': { input: 3.6, output: 18.0, cacheInput: 0.36 },
 }
 
 /**
@@ -85,6 +86,7 @@ const BUILTIN_ALIASES_LC: Record<string, string> = {
   'minimax-m3:free': 'minimax-m3',
   'deepseek-latest': 'deepseek-v4-flash',
   'deepseek-latest:free': 'deepseek-v4-flash',
+  'cursor-grok-4.6-high': 'grok-4.6',
 }
 
 // ---- 用户注入的注册表 ----
@@ -149,6 +151,7 @@ const DISPLAY_NAMES: Record<string, string> = {
   'claude-opus-4.8': 'Claude Opus 4.8',
   'claude-sonnet-4.6': 'Claude Sonnet 4.6',
   'claude-haiku-4.5': 'Claude Haiku 4.5',
+  'composer-2.5': 'Composer 2.5',
 }
 
 function fallbackDisplayName(key: string): string {
