@@ -10,6 +10,7 @@ import { ByDayPage } from './pages/by-day.tsx'
 import { BySessionPage } from './pages/by-session.tsx'
 import { ByHourPage } from './pages/by-hour.tsx'
 import { ByToolPage } from './pages/by-tool.tsx'
+import { ByPromptPage } from './pages/by-prompt.tsx'
 import { ErrorsPage } from './pages/errors.tsx'
 import { SqlConsolePage } from './pages/sql-console.tsx'
 import { AboutPage } from './pages/about.tsx'
@@ -243,6 +244,8 @@ function PageHost({
       return <ByHourPage db={state.db} />
     case 'by-tool':
       return <ByToolPage db={state.db} />
+    case 'by-prompt':
+      return <ByPromptPage db={state.db} />
     case 'errors':
       return <ErrorsPage db={state.db} />
     case 'sql':

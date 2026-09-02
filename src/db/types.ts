@@ -116,6 +116,69 @@ export type ByToolRow = {
   avgOutputBytes: number
 }
 
+/** turn × model 明细：用于主线程计算每个 turn 的成本并找主模型 */
+export type ByPromptByModelRow = {
+  turnId: string
+  modelId: string
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+}
+
+/** 每个 turn 的整体聚合 */
+export type ByPromptSummaryRow = {
+  turnId: string
+  modelCalls: number
+  totalTokens: number
+  errorCount: number
+  firstSeen: number | null
+  lastSeen: number | null
+}
+
+/** 按模型聚合后的 Prompt 统计（展示用） */
+export type ByPromptModelRow = {
+  groupKey: string
+  displayName: string
+  modelIds: string[]
+  merged: boolean
+  marked: boolean
+  recognized: boolean
+  promptCount: number
+  calls: number
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  errorCount: number
+  cost: number
+  avgTokensPerPrompt: number
+  avgCostPerPrompt: number
+  avgCallsPerPrompt: number
+}
+
+/** 每个 Prompt（turn）的明细 */
+export type ByPromptDetailRow = {
+  turnId: string
+  primaryModelKey: string
+  primaryModelDisplay: string
+  modelCalls: number
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  errorCount: number
+  cost: number
+  firstSeen: number | null
+  lastSeen: number | null
+}
+
 export type ErrorsOverview = {
   totalCalls: number
   errorCount: number

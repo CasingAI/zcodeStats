@@ -13,6 +13,9 @@
 
 import type {
   ByDayByModelRow,
+  ByPromptByModelRow,
+  ByPromptDetailRow,
+  ByPromptSummaryRow,
   BySessionByModelRow,
   ByDayRow,
   ByHourGrid,
@@ -262,6 +265,49 @@ export const QUERIES = {
       FROM model_usage
       WHERE status='completed' AND session_id IS NOT NULL ${rangeClause(range)}
       GROUP BY session_id, model_id
+    `
+    return { sql }
+  },
+
+  /**
+   * 按 turn × model_id 展开：每行 4 项分项 token。
+   * 主线程先按 (turn, model) 算出成本，再在每个 turn 内找 token 占比最高的 model 作为主模型，
+   * 最后按主模型分组得到「平均每个 Prompt 的成本/token」。
+   */
+  byPromptByModel(range: Range): ParamQuery {
+    const sql = `
+      SELECT
+        turn_id                                               AS turnId,
+        model_id                                              AS modelId,
+        COUNT(*)                                              AS calls,
+        SUM(input_tokens)                                     AS inputTokens,
+        SUM(output_tokens)                                    AS outputTokens,
+        SUM(reasoning_tokens)                                 AS reasoningTokens,
+        SUM(cache_read_input_tokens)                          AS cacheReadTokens,
+        SUM(cache_creation_input_tokens)                      AS cacheCreationTokens
+      FROM model_usage
+      WHERE status='completed' AND turn_id IS NOT NULL ${rangeClause(range)}
+      GROUP BY turn_id, model_id
+    `
+    return { sql }
+  },
+
+  /**
+   * 每个 turn 的整体聚合：调用次数、总 token、时间跨度、错误数。
+   * 与 byPromptByModel 一起用于 Prompt 明细和主模型归因。
+   */
+  byPromptSummary(range: Range): ParamQuery {
+    const sql = `
+      SELECT
+        turn_id                                               AS turnId,
+        COUNT(*)                                              AS modelCalls,
+        SUM(computed_total_tokens)                            AS totalTokens,
+        SUM(CASE WHEN status='error' THEN 1 ELSE 0 END)     AS errorCount,
+        MIN(started_at)                                       AS firstSeen,
+        MAX(completed_at)                                     AS lastSeen
+      FROM model_usage
+      WHERE turn_id IS NOT NULL ${rangeClause(range)}
+      GROUP BY turn_id
     `
     return { sql }
   },
@@ -610,6 +656,133 @@ export function shapeErrors(
       n: toNumber(row[1]),
     })),
   }
+}
+
+export function shapeByPromptByModel(r: WorkerExecResult): ByPromptByModelRow[] {
+  return r.rows.map((row) => ({
+    turnId: String(row[0] ?? ''),
+    modelId: String(row[1] ?? ''),
+    calls: toNumber(row[2]),
+    inputTokens: toNumber(row[3]),
+    outputTokens: toNumber(row[4]),
+    reasoningTokens: toNumber(row[5]),
+    cacheReadTokens: toNumber(row[6]),
+    cacheCreationTokens: toNumber(row[7]),
+  }))
+}
+
+export function shapeByPromptSummary(r: WorkerExecResult): ByPromptSummaryRow[] {
+  return r.rows.map((row) => ({
+    turnId: String(row[0] ?? ''),
+    modelCalls: toNumber(row[1]),
+    totalTokens: toNumber(row[2]),
+    errorCount: toNumber(row[3]),
+    firstSeen: toNumberOrNull(row[4]),
+    lastSeen: toNumberOrNull(row[5]),
+  }))
+}
+
+/**
+ * 把 (turn × model) 明细折叠成每个 turn 的明细，并找出主模型。
+ * 主模型 = 该 turn 内各分项 token 之和最大的 model_id。
+ * 一次 turn 的全部 token/cost 都归因到这个主模型上。
+ */
+export function aggregateByPrompt(
+  byModelRows: readonly ByPromptByModelRow[],
+  summaryRows: readonly ByPromptSummaryRow[],
+): ByPromptDetailRow[] {
+  type ModelSlice = {
+    modelId: string
+    calls: number
+    inputTokens: number
+    outputTokens: number
+    reasoningTokens: number
+    cacheReadTokens: number
+    cacheCreationTokens: number
+    cost: number
+  }
+
+  const byTurn = new Map<string, ModelSlice[]>()
+  for (const r of byModelRows) {
+    const slice: ModelSlice = {
+      modelId: r.modelId,
+      calls: r.calls,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      reasoningTokens: r.reasoningTokens,
+      cacheReadTokens: r.cacheReadTokens,
+      cacheCreationTokens: r.cacheCreationTokens,
+      cost: costFor(r.modelId, r),
+    }
+    const arr = byTurn.get(r.turnId) ?? []
+    arr.push(slice)
+    byTurn.set(r.turnId, arr)
+  }
+
+  const summaryMap = new Map<string, ByPromptSummaryRow>()
+  for (const s of summaryRows) summaryMap.set(s.turnId, s)
+
+  const details: ByPromptDetailRow[] = []
+  for (const [turnId, slices] of byTurn) {
+    // 主模型：分项 token 总和最大的那个 model_id
+    let primary = slices[0]
+    if (!primary) continue
+    for (const s of slices) {
+      const sTokens =
+        s.inputTokens +
+        s.outputTokens +
+        s.reasoningTokens +
+        s.cacheReadTokens +
+        s.cacheCreationTokens
+      const pTokens =
+        primary.inputTokens +
+        primary.outputTokens +
+        primary.reasoningTokens +
+        primary.cacheReadTokens +
+        primary.cacheCreationTokens
+      if (sTokens > pTokens) primary = s
+    }
+
+    const totalTokens = slices.reduce(
+      (sum, s) =>
+        sum +
+        s.inputTokens +
+        s.outputTokens +
+        s.reasoningTokens +
+        s.cacheReadTokens +
+        s.cacheCreationTokens,
+      0,
+    )
+    const inputTokens = slices.reduce((sum, s) => sum + s.inputTokens, 0)
+    const outputTokens = slices.reduce((sum, s) => sum + s.outputTokens, 0)
+    const reasoningTokens = slices.reduce((sum, s) => sum + s.reasoningTokens, 0)
+    const cacheReadTokens = slices.reduce((sum, s) => sum + s.cacheReadTokens, 0)
+    const cacheCreationTokens = slices.reduce((sum, s) => sum + s.cacheCreationTokens, 0)
+    const cost = slices.reduce((sum, s) => sum + s.cost, 0)
+    const calls = slices.reduce((sum, s) => sum + s.calls, 0)
+    const summary = summaryMap.get(turnId)
+
+    details.push({
+      turnId,
+      primaryModelKey: primary.modelId,
+      primaryModelDisplay: primary.modelId,
+      modelCalls: calls,
+      totalTokens,
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      errorCount: summary?.errorCount ?? 0,
+      cost,
+      firstSeen: summary?.firstSeen ?? null,
+      lastSeen: summary?.lastSeen ?? null,
+    })
+  }
+
+  // 按发生时间降序，方便明细表看最近 Prompt
+  details.sort((a, b) => (b.firstSeen ?? 0) - (a.firstSeen ?? 0))
+  return details
 }
 
 export type RawSqlResult = SqlExecResult

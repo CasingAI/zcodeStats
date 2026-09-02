@@ -14,6 +14,7 @@ export const ROUTES: readonly Route[] = [
   { path: 'by-session', title: '按会话', showInNav: true },
   { path: 'by-hour', title: '按小时', showInNav: true },
   { path: 'by-tool', title: '按工具', showInNav: true },
+  { path: 'by-prompt', title: '按 Prompt', showInNav: true },
   { path: 'errors', title: '错误与重试', showInNav: true },
   { path: 'sql', title: 'SQL 控制台', showInNav: true },
   { path: 'about', title: '关于', showInNav: true },
