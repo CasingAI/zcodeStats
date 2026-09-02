@@ -5,9 +5,9 @@ import { SegmentedControl } from '../ui/segmented-control.tsx'
 import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
 import { useQuery } from '../lib/use-query.ts'
-import { QUERIES, rangeSignature, shapeSpeedTrend } from '../db/queries.ts'
+import { QUERIES, rangeSignature, shapeSpeedTrend, shapeSpeedTrendSamples } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
-import type { SpeedTrendRow } from '../db/types.ts'
+import type { SpeedTrendRow, SpeedSampleRow } from '../db/types.ts'
 import {
   useMarks,
   resolveGroupKey,
@@ -34,6 +34,7 @@ type TopN = '5' | '8' | 'all'
 
 const STAT_ITEMS = [
   { id: 'avg', label: '平均' },
+  { id: 'median', label: '中位数' },
   { id: 'max', label: '最大' },
   { id: 'min', label: '最小' },
 ] as const
@@ -59,15 +60,44 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
     },
   )
 
+  // 中位数明细：db 传 null 时 hook 保持 loading → 只在切到中位数口径时才真正查询
+  const samples = useQuery<SpeedSampleRow[]>(
+    statMode === 'median' ? db : null,
+    `speed-samples:${rangeSignature(range)}`,
+    async (d) => {
+      const q = QUERIES.speedTrendSamples(range)
+      return shapeSpeedTrendSamples(await d.select(q.sql, q.bind))
+    },
+  )
+
   const series = useMemo(() => {
     if (state.kind !== 'ok') return null
+    if (statMode === 'median') {
+      if (samples.kind !== 'ok') return null
+      return buildMedianSeries(samples.data, gran, topN, marks)
+    }
     return buildSpeedSeries(state.data, gran, topN, marks, statMode)
-  }, [state.kind === 'ok' ? state.data : null, gran, topN, marks, statMode])
+  }, [state.kind === 'ok' ? state.data : null, samples.kind === 'ok' ? samples.data : null, gran, topN, marks, statMode])
 
   const kpis = useMemo(() => {
     if (state.kind !== 'ok') return null
     return buildKpis(state.data, marks, statMode)
   }, [state.kind === 'ok' ? state.data : null, marks, statMode])
+
+  // 中位数口径下的头条/最快模型（明细行算中位数）；TTFT 卡始终用主查询的 kpis
+  const medianKpis = useMemo(() => {
+    if (statMode !== 'median' || samples.kind !== 'ok') return null
+    return buildMedianKpis(samples.data, marks)
+  }, [statMode, samples.kind === 'ok' ? samples.data : null, marks])
+
+  const headline = statMode === 'median' ? medianKpis?.headline ?? null : kpis?.headline ?? null
+  const headlineLabel =
+    statMode === 'median' ? '中位解码速度' :
+    statMode === 'max' ? '单次最快速度' :
+    statMode === 'min' ? '单次最慢速度' : '净解码速度'
+  const headlineSub =
+    statMode === 'median' ? (medianKpis?.headlineSub ?? '明细加载中…') : kpis?.headlineSub ?? ''
+  const fastest = statMode === 'median' ? medianKpis?.fastest ?? null : kpis?.fastest ?? null
 
   const xFormat =
     gran === 'hour'
@@ -91,7 +121,8 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
             各模型解码速度趋势（同一张图，悬浮查看数值；图例可点击隐藏/显示单条线，悬停可聚焦该系列）。
             本页为<strong>净解码速度</strong>：仅统计主对话与子代理的正常生成请求（已剔除上下文压缩、标题生成等辅助请求），
             与总览等其他页面的平均速度口径不同。解码速度 = 输出 token ÷（总时长 − 首 token 等待），不含等首字的时间，无样本时段断线。
-            统计口径：平均 = 按 token 加权；最大/最小 = 单次调用的极值，且仅统计解码窗口 ≥3s、输出 ≥32 token 的正常长度调用
+            统计口径：平均 = 按 token 加权；中位数 = 单次调用速度的中间值，最抗极值干扰；
+            最大/最小 = 单次调用的极值，且仅统计解码窗口 ≥3s、输出 ≥32 token 的正常长度调用
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -129,14 +160,20 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
         {state.kind === 'ok' && state.data.length === 0 && (
           <div class="app-banner">所选时间窗内没有可计算解码速度的调用（需要 completed、时长 &gt; 0、有输出且记录了有效首字时间）</div>
         )}
+        {state.kind === 'ok' && statMode === 'median' && samples.kind === 'loading' && (
+          <div class="app-banner">中位数明细加载中…</div>
+        )}
+        {state.kind === 'ok' && statMode === 'median' && samples.kind === 'error' && (
+          <div class="app-banner app-banner--error">{samples.error}</div>
+        )}
         {state.kind === 'ok' && state.data.length > 0 && kpis && (
           <>
             <div class="kpi-grid kpi-grid--3" style={{ marginBottom: 12 }}>
               <KpiCard
-                label={statMode === 'avg' ? '净解码速度' : statMode === 'max' ? '单次最快速度' : '单次最慢速度'}
+                label={headlineLabel}
                 tone="orange"
-                value={kpis.headline == null ? '—' : formatTokensPerSecond(kpis.headline)}
-                sub={kpis.headlineSub}
+                value={headline == null ? '—' : formatTokensPerSecond(headline)}
+                sub={headlineSub}
               />
               <KpiCard
                 label="平均首字等待"
@@ -151,10 +188,10 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
               <KpiCard
                 label="最快模型"
                 tone="default"
-                value={kpis.fastest ? displayNameOf(kpis.fastest.key) : '—'}
+                value={fastest ? displayNameOf(fastest.key) : '—'}
                 sub={
-                  kpis.fastest
-                    ? `${formatTokensPerSecond(kpis.fastest.speed)} · ${formatFull(kpis.fastest.n)} 次样本`
+                  fastest
+                    ? `${formatTokensPerSecond(fastest.speed)} · ${formatFull(fastest.n)} 次样本`
                     : '有效样本不足 10 次的模型不参与'
                 }
               />
@@ -339,6 +376,130 @@ function buildSpeedSeries(
     }))
   }
   return { keys, ys, defs }
+}
+
+/** 中位数：偶数个样本取中间两行的算术平均（标准定义） */
+function medianOf(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1
+    ? sorted[mid] ?? null
+    : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
+}
+
+type MedianKpis = {
+  /** 全区间单次速度的中位数（tok/s） */
+  headline: number | null
+  headlineSub: string
+  /** 样本 ≥ 10 次的组里中位数最高者 */
+  fastest: { key: string; speed: number; n: number } | null
+}
+
+/**
+ * 中位数口径分线：明细行（小时桶 × model_id × 单次速度）折叠到目标粒度后，
+ * 每个（组 × 桶）取单次速度的中位数。TopN 按样本数降序（明细行没有 output_tokens 可加权）。
+ */
+function buildMedianSeries(
+  rows: readonly SpeedSampleRow[],
+  gran: Gran,
+  topN: TopN,
+  marks: MarkMap,
+): SpeedSeries {
+  const keys: string[] = []
+  const keySeen = new Set<string>()
+  const groups = new Map<string, Map<string, number[]>>()
+  const groupCounts = new Map<string, number>()
+  for (const r of rows) {
+    const gk = resolveGroupKey(r.modelId, 'name', marks)
+    const bk = foldKey(r.bucket, gran)
+    if (!keySeen.has(bk)) {
+      keySeen.add(bk)
+      keys.push(bk)
+    }
+    let gm = groups.get(gk)
+    if (!gm) {
+      gm = new Map()
+      groups.set(gk, gm)
+      groupCounts.set(gk, 0)
+    }
+    const arr = gm.get(bk)
+    if (arr) arr.push(r.speedTokPerS)
+    else gm.set(bk, [r.speedTokPerS])
+    groupCounts.set(gk, (groupCounts.get(gk) ?? 0) + 1)
+  }
+
+  const sorted = [...groups.keys()].sort(
+    (a, b) => (groupCounts.get(b) ?? 0) - (groupCounts.get(a) ?? 0),
+  )
+  const limit = topN === 'all' ? sorted.length : Number(topN)
+  const head = sorted.slice(0, limit)
+  const tail = sorted.slice(limit)
+  const colorOf = (i: number) => MODEL_LINE_COLORS[i % MODEL_LINE_COLORS.length] ?? '#1f6ec7'
+
+  const defs: SpeedSeries['defs'] = []
+  const ys: (number | null)[][] = []
+  for (const gk of head) {
+    const gm = groups.get(gk)!
+    defs.push({
+      label: displayNameOf(gk),
+      stroke: colorOf(defs.length),
+      width: 2,
+      paths: modelPaths,
+      value: (_u, _raw, v) => (v == null ? '—' : formatTokensPerSecond(v)),
+    })
+    ys.push(keys.map((k) => {
+      const arr = gm.get(k)
+      return arr ? medianOf(arr) : null
+    }))
+  }
+  if (tail.length > 0) {
+    const merged = new Map<string, number[]>()
+    for (const gk of tail) {
+      for (const [k, arr] of groups.get(gk) ?? []) {
+        const m = merged.get(k)
+        if (m) m.push(...arr)
+        else merged.set(k, [...arr])
+      }
+    }
+    defs.push({
+      label: `其他（${tail.length} 个模型）`,
+      stroke: colorOf(defs.length),
+      width: 2,
+      paths: modelPaths,
+      value: (_u, _raw, v) => (v == null ? '—' : formatTokensPerSecond(v)),
+    })
+    ys.push(keys.map((k) => {
+      const arr = merged.get(k)
+      return arr ? medianOf(arr) : null
+    }))
+  }
+  return { keys, ys, defs }
+}
+
+function buildMedianKpis(rows: readonly SpeedSampleRow[], marks: MarkMap): MedianKpis {
+  const all: number[] = []
+  const byGroup = new Map<string, number[]>()
+  for (const r of rows) {
+    all.push(r.speedTokPerS)
+    const gk = resolveGroupKey(r.modelId, 'name', marks)
+    const arr = byGroup.get(gk)
+    if (arr) arr.push(r.speedTokPerS)
+    else byGroup.set(gk, [r.speedTokPerS])
+  }
+  let fastest: MedianKpis['fastest'] = null
+  for (const [key, arr] of byGroup) {
+    if (arr.length < 10) continue
+    const speed = medianOf(arr)
+    if (speed != null && (fastest == null || speed > fastest.speed)) {
+      fastest = { key, speed, n: arr.length }
+    }
+  }
+  return {
+    headline: medianOf(all),
+    headlineSub: `${formatFull(all.length)} 次有效样本（中位数不受极值影响）`,
+    fastest,
+  }
 }
 
 type SpeedKpis = {

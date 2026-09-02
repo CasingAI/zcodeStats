@@ -26,6 +26,7 @@ import type {
   ByToolRow,
   ErrorsOverview,
   OverviewKpis,
+  SpeedSampleRow,
   SpeedTrendRow,
   SqlExecResult,
   TimingAggregates,
@@ -357,6 +358,25 @@ export const QUERIES = {
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)}
       GROUP BY bucket, model_id
+      ORDER BY bucket ASC
+    `
+    return { sql }
+  },
+
+  /**
+   * 速度页「中位数」口径的数据源：单次调用速度明细（本地小时桶 × model_id）。
+   * 中位数无法像 SUM/MAX/MIN 那样跨桶合并，所以把明细交给前端按目标粒度折叠后计算。
+   * 口径同 SPEED_SAMPLE（仅正常生成请求）。
+   */
+  speedTrendSamples(range: Range): ParamQuery {
+    const tzOffsetMs = timezoneOffsetMs()
+    const sql = `
+      SELECT
+        strftime('%Y-%m-%dT%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS bucket,
+        model_id                                            AS modelId,
+        output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) AS speedTokPerS
+      FROM model_usage
+      WHERE status='completed' AND ${SPEED_SAMPLE} ${rangeClause(range)}
       ORDER BY bucket ASC
     `
     return { sql }
@@ -934,6 +954,15 @@ export function shapeSpeedTrend(r: WorkerExecResult): SpeedTrendRow[] {
     ttftSampleCount: toNumber(row[6]),
     speedMaxTokPerS: toNumberOrNull(row[7]),
     speedMinTokPerS: toNumberOrNull(row[8]),
+  }))
+}
+
+/** speedTrendSamples 的列序：bucket, modelId, speedTokPerS */
+export function shapeSpeedTrendSamples(r: WorkerExecResult): SpeedSampleRow[] {
+  return r.rows.map((row) => ({
+    bucket: String(row[0] ?? ''),
+    modelId: String(row[1] ?? ''),
+    speedTokPerS: toNumber(row[2]),
   }))
 }
 

@@ -149,6 +149,16 @@ export type SpeedTrendRow = {
   speedMinTokPerS: number | null
 }
 
+/** 速度页中位数口径的单次调用速度明细（见 queries.ts speedTrendSamples / SPEED_SAMPLE）。
+ *  中位数不能跨桶合并，前端按目标粒度折叠后自行取中位 */
+export type SpeedSampleRow = {
+  /** 本地时区小时桶，格式 'YYYY-MM-DDTHH' */
+  bucket: string
+  modelId: string
+  /** 单次调用的纯解码速度（tok/s） */
+  speedTokPerS: number
+}
+
 export type BySessionByModelRow = {
   sessionId: string
   modelId: string
