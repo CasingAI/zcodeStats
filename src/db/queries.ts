@@ -75,6 +75,7 @@ function modelIdClause(bind: unknown[], modelIds: readonly string[]): string {
 
 export const QUERIES = {
   overview(range: Range): ParamQuery {
+    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
         COALESCE(SUM(computed_total_tokens), 0)                                 AS totalTokens,
@@ -90,7 +91,7 @@ export const QUERIES = {
         COALESCE(SUM(retry_count), 0)                                            AS retryTotal,
         MIN(started_at)                                                          AS firstSeen,
         MAX(started_at)                                                          AS lastSeen,
-        COUNT(DISTINCT strftime('%Y-%m-%d', started_at/1000, 'unixepoch'))       AS activeDays,
+        COUNT(DISTINCT strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch'))       AS activeDays,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 THEN duration_ms ELSE 0 END)            AS totalDurationMs,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 THEN 1 ELSE 0 END)                       AS durationSampleCount,
         SUM(CASE WHEN status='completed' AND duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
@@ -185,9 +186,10 @@ export const QUERIES = {
 
   byDay(range: Range, modelIds: readonly string[] = []): ParamQuery {
     const bind: unknown[] = []
+    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        strftime('%Y-%m-%d', started_at/1000, 'unixepoch') AS day,
+        strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS day,
         COUNT(*)                                            AS calls,
         SUM(computed_total_tokens)                          AS totalTokens,
         SUM(input_tokens)                                   AS inputTokens,
@@ -204,8 +206,8 @@ export const QUERIES = {
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)} ${modelIdClause(bind, modelIds)}
       GROUP BY day
@@ -264,8 +266,8 @@ export const QUERIES = {
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)} ${modelIdClause(bind, modelIds)}
       GROUP BY weekday, hour
@@ -278,9 +280,10 @@ export const QUERIES = {
    * 4 个数值会在主线程按 model_id 单价加权成成本。
    */
   byDayByModel(range: Range): ParamQuery {
+    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        strftime('%Y-%m-%d', started_at/1000, 'unixepoch') AS day,
+        strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS day,
         model_id                                            AS modelId,
         SUM(input_tokens)                                   AS inputTokens,
         SUM(output_tokens)                                  AS outputTokens,
@@ -292,8 +295,8 @@ export const QUERIES = {
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed' ${rangeClause(range)}
       GROUP BY day, model_id
@@ -425,9 +428,10 @@ export const QUERIES = {
    */
   byDayByProviderModel(range: Range, providerId: string, modelId: string): ParamQuery {
     const bind: unknown[] = [providerId, modelId]
+    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        strftime('%Y-%m-%d', started_at/1000, 'unixepoch') AS day,
+        strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS day,
         SUM(input_tokens)                                   AS inputTokens,
         SUM(output_tokens)                                  AS outputTokens,
         SUM(reasoning_tokens)                               AS reasoningTokens,
@@ -438,8 +442,8 @@ export const QUERIES = {
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed'
         AND provider_id = ?
@@ -468,8 +472,8 @@ export const QUERIES = {
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN 1 ELSE 0 END) AS speedSampleCount,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN duration_ms > 0 AND output_tokens > 0 THEN duration_ms ELSE 0 END) AS speedDurationMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
-        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL THEN 1 ELSE 0 END) AS ttftSampleCount
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN time_to_first_token_ms ELSE 0 END) AS ttftSumMs,
+        SUM(CASE WHEN time_to_first_token_ms IS NOT NULL AND time_to_first_token_ms >= 0 THEN 1 ELSE 0 END) AS ttftSampleCount
       FROM model_usage
       WHERE status='completed'
         AND provider_id = ?
@@ -552,9 +556,9 @@ export const QUERIES = {
       CASE WHEN COUNT(*) > 0
            THEN CAST(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
            ELSE 0 END                                                 AS errorRate,
-      AVG(duration_ms)                                                AS avgDurationMs,
+      AVG(CASE WHEN duration_ms > 0 THEN duration_ms END)             AS avgDurationMs,
       SUM(COALESCE(output_bytes, 0))                                  AS totalOutputBytes,
-      AVG(COALESCE(output_bytes, 0))                                  AS avgOutputBytes
+      AVG(CASE WHEN duration_ms > 0 THEN COALESCE(output_bytes, 0) END) AS avgOutputBytes
     FROM tool_usage
     GROUP BY tool_name
     ORDER BY calls DESC
@@ -910,7 +914,8 @@ export function shapeByHour(r: WorkerExecResult): ByHourGrid {
     const durationSampleCount = toNumber(row[5])
     const speedDurationMs = toNumber(row[8])
     const speedSampleCount = toNumber(row[6])
-    const ttftSampleCount = toNumber(row[9])
+    const ttftSumMs = toNumber(row[9])
+    const ttftSampleCount = toNumber(row[10])
     return {
       weekday: toNumber(row[0]),
       hour: toNumber(row[1]),
@@ -919,12 +924,12 @@ export function shapeByHour(r: WorkerExecResult): ByHourGrid {
       speedOutputTokens: toNumber(row[7]),
       speedDurationMs,
       speedSampleCount,
-      ttftSumMs: toNumber(row[10]),
+      ttftSumMs,
       ttftSampleCount,
       totalDurationMs: toNumber(row[4]),
       durationSampleCount,
       avgOutputSpeed: speedDurationMs > 0 ? (toNumber(row[7]) / speedDurationMs) * 1000 : null,
-      avgTtftMs: ttftSampleCount > 0 ? toNumber(row[10]) / ttftSampleCount : null,
+      avgTtftMs: ttftSampleCount > 0 ? ttftSumMs / ttftSampleCount : null,
       avgDurationMs: durationSampleCount > 0 ? toNumber(row[4]) / durationSampleCount : null,
     }
   })

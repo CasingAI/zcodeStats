@@ -173,7 +173,7 @@ function KpiGrid(props: { data?: (ErrorsOverview & { cost: number }); loading?: 
         tone="red"
         loading={loading}
         value={data ? formatRMB(data.cost) : ''}
-        sub="status=error / context_exceeded / cancelled 行的成本合计"
+        sub="status=error / context_exceeded / cancelled / retry_count>0 行的成本合计"
       />
     </div>
   )

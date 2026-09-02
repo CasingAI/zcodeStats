@@ -159,7 +159,7 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
                 yFormat={metricFormatter(metric)}
                 xFormat={(v) => {
                   const d = new Date(v * 1000)
-                  return `${d.getUTCFullYear() % 100}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
                 }}
               />
             ) : (
@@ -171,7 +171,7 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
                 yFormat={metricFormatter(metric)}
                 xFormat={(v) => {
                   const d = new Date(v * 1000)
-                  return `${d.getUTCFullYear() % 100}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
                 }}
               />
             )}
@@ -257,13 +257,12 @@ function metricFormatter(metric: Metric) {
 function buildData(rows: ByDayRow[], metric: Metric) {
   const days = rows.map((r) => r.day)
   if (metric === 'cost') return toTimeAlignedData(days, [rows.map((r) => r.cost)])
+  // 无样本的天保留 null（uPlot 断线），避免画成 0 造成"当天速度/TTFT 为 0"的误读
   if (metric === 'speed') {
-    return toTimeAlignedData(days, [
-      rows.map((r) => (r.avgOutputSpeed != null ? r.avgOutputSpeed : 0)),
-    ])
+    return toTimeAlignedData(days, [rows.map((r) => r.avgOutputSpeed)])
   }
   if (metric === 'ttft') {
-    return toTimeAlignedData(days, [rows.map((r) => (r.avgTtftMs != null ? r.avgTtftMs : 0))])
+    return toTimeAlignedData(days, [rows.map((r) => r.avgTtftMs)])
   }
   return toTimeAlignedData(days, [
     rows.map((r) => r.totalTokens),
@@ -276,7 +275,7 @@ function buildData(rows: ByDayRow[], metric: Metric) {
 
 type ModelSeries = {
   days: string[]
-  ys: number[][]
+  ys: (number | null)[][]
   defs: {
     label: string
     stroke: string
@@ -306,9 +305,9 @@ function emptyTimingBucket(): TimingBucket {
   }
 }
 
-function bucketValue(metric: Metric, b: TimingBucket): number {
-  if (metric === 'speed') return b.speedDurationMs > 0 ? (b.speedOutputTokens / b.speedDurationMs) * 1000 : 0
-  if (metric === 'ttft') return b.ttftSampleCount > 0 ? b.ttftSumMs / b.ttftSampleCount : 0
+function bucketValue(metric: Metric, b: TimingBucket): number | null {
+  if (metric === 'speed') return b.speedDurationMs > 0 ? (b.speedOutputTokens / b.speedDurationMs) * 1000 : null
+  if (metric === 'ttft') return b.ttftSampleCount > 0 ? b.ttftSumMs / b.ttftSampleCount : null
   return 0
 }
 
@@ -369,7 +368,7 @@ function buildModelSeries(
   const colorOf = (i: number) => MODEL_LINE_COLORS[i % MODEL_LINE_COLORS.length] ?? '#1f6ec7'
 
   const defs: ModelSeries['defs'] = []
-  const ys: number[][] = []
+  const ys: (number | null)[][] = []
   for (const [key, entry] of head) {
     const i = defs.length
     defs.push({
@@ -388,10 +387,12 @@ function buildModelSeries(
     ys.push(entry.ys.map((b) => bucketValue(metric, b)))
   }
   if (tail.length > 0) {
-    const merged = new Array<number>(days.length).fill(0)
+    const merged = new Array<number | null>(days.length).fill(null)
     for (const [, entry] of tail) {
       for (let i = 0; i < merged.length; i++) {
-        merged[i] = (merged[i] ?? 0) + bucketValue(metric, entry.ys[i] ?? emptyTimingBucket())
+        const v = bucketValue(metric, entry.ys[i] ?? emptyTimingBucket())
+        if (v == null) continue
+        merged[i] = (merged[i] ?? 0) + v
       }
     }
     defs.push({

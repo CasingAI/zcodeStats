@@ -356,7 +356,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
                 yFormat={(v) => (Math.abs(v) >= 1000 ? formatCount(v) : String(Math.round(v)))}
                 xFormat={(v) => {
                   const d = new Date(v * 1000)
-                  return `${d.getUTCFullYear() % 100}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
                 }}
               />
             )}
@@ -369,7 +369,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
             ) : (
               <UPlotChart
                 data={toTimeAlignedData(state.data.daily.map((r) => r.day), [
-                  state.data.daily.map((r) => r.avgOutputSpeed ?? 0),
+                  state.data.daily.map((r) => r.avgOutputSpeed),
                 ])}
                 time
                 height={220}
@@ -377,7 +377,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
                 yFormat={(v) => formatTokensPerSecond(v)}
                 xFormat={(v) => {
                   const d = new Date(v * 1000)
-                  return `${d.getUTCFullYear() % 100}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
                 }}
               />
             )}
@@ -390,7 +390,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
             ) : (
               <UPlotChart
                 data={toTimeAlignedData(state.data.daily.map((r) => r.day), [
-                  state.data.daily.map((r) => r.avgTtftMs ?? 0),
+                  state.data.daily.map((r) => r.avgTtftMs),
                 ])}
                 time
                 height={220}
@@ -398,7 +398,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
                 yFormat={(v) => formatDuration(v)}
                 xFormat={(v) => {
                   const d = new Date(v * 1000)
-                  return `${d.getUTCFullYear() % 100}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
                 }}
               />
             )}

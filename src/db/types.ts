@@ -45,7 +45,7 @@ export type OverviewKpis = TimingAggregates & {
   toolErrorCount: number
   retryTotal: number
   activeDays: number
-  /** cache_read / (input + cache_creation + cache_read) */
+  /** cache_read / (input + cache_creation) */
   cacheHitRate: number
   firstSeen: number | null
   lastSeen: number | null
@@ -64,7 +64,7 @@ export type ByModelRow = TimingAggregates & {
   cacheReadTokens: number
   cacheCreationTokens: number
   errorCount: number
-  /** cache_read / (input + cache_creation + cache_read)；无分母时为 0 */
+  /** cache_read / (input + cache_creation)；无分母时为 0（与 SQL 实现口径一致） */
   cacheHitRate: number
   share: number
   /** ¥ 估算成本（per-id 计算后求和） */
@@ -81,7 +81,7 @@ export type ByProviderRow = TimingAggregates & {
   cacheReadTokens: number
   cacheCreationTokens: number
   errorCount: number
-  /** cache_read / (input + cache_creation + cache_read)；无分母时为 0 */
+  /** cache_read / (input + cache_creation)；无分母时为 0（与 SQL 实现口径一致） */
   cacheHitRate: number
   share: number
   /** ¥ 估算成本 */
@@ -99,7 +99,7 @@ export type ByProviderModelRow = TimingAggregates & {
   cacheReadTokens: number
   cacheCreationTokens: number
   errorCount: number
-  /** cache_read / (input + cache_creation + cache_read)；无分母时为 0 */
+  /** cache_read / (input + cache_creation)；无分母时为 0（与 SQL 实现口径一致） */
   cacheHitRate: number
   share: number
   /** ¥ 估算成本 */

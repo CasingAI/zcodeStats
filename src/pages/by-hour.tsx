@@ -7,7 +7,7 @@ import { QUERIES, rangeSignature, shapeByHour } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { ByHourGrid as ByHourGridT } from '../db/types.ts'
 import { useRange } from '../lib/range-context.tsx'
-import { formatDuration, formatTokensPerSecond } from '../lib/format.ts'
+import { formatCount, formatDuration, formatTokensPerSecond } from '../lib/format.ts'
 
 type Metric = 'tokens' | 'speed' | 'ttft'
 
@@ -66,7 +66,7 @@ export function ByHourPage({ db }: { db: OpenedDb }) {
               if (metric === 'ttft') {
                 return `${base} · ${c.value > 0 ? formatDuration(c.value) : '—'} · ${c.label ?? ''} 次样本`
               }
-              return `${base} · ${c.value} token · ${c.label ?? ''} 次调用`
+              return `${base} · ${formatCount(c.value)} token · ${c.label ?? ''} 次调用`
             }}
           />
         )}

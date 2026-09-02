@@ -225,10 +225,11 @@ export function UPlotChart({
 
 // ---- 小工具：给日趋势对齐 x/y 数组 ----
 
-/** 把 day 字符串数组 + 各 y 数组对齐为 uPlot AlignedData（x 为 unix 秒） */
+/** 把 day 字符串数组 + 各 y 数组对齐为 uPlot AlignedData（x 为 unix 秒）。
+ *  day 按 'YYYY-MM-DDT00:00:00' 解析为**本地**午夜，与日粒度查询的本地时区分组一致。 */
 export function toTimeAlignedData(
   days: readonly string[],
-  ys: readonly (readonly number[])[],
+  ys: readonly (readonly (number | null)[])[],
 ): AlignedData {
   const x = days.map((d) => Math.floor(Date.parse(`${d}T00:00:00`) / 1000))
   return [x, ...ys.map((arr) => Array.from(arr))]
