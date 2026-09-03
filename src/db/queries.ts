@@ -36,7 +36,7 @@ import { costFor, type UsageForCost } from '../lib/pricing.ts'
 // 参数化查询：sql 里带 ? 占位符，bind 为对应的绑定值（走 worker 的 bind）。
 export type ParamQuery = { sql: string; bind?: unknown[] }
 
-export type RangePreset = '7d' | '30d' | 'all'
+export type RangePreset = '30m' | '7d' | '30d' | 'all'
 
 export type Range =
   | { kind: 'preset'; preset: RangePreset }
@@ -55,8 +55,47 @@ function rangeClause(range: Range): string {
     return `AND started_at >= ${range.from} AND started_at < ${range.to}`
   }
   if (range.preset === 'all') return ''
+  if (range.preset === '30m') return `AND started_at >= ${Date.now() - 30 * 60 * 1000}`
   const ms = (range.preset === '7d' ? 7 : 30) * 86400 * 1000
   return `AND started_at >= ${Date.now() - ms}`
+}
+
+// ---- 趋势分桶粒度 ----
+//
+// 范围越短桶越大粒度，否则短范围下趋势图只剩 1 个点：
+//   - byDay 系列（byDay / byDayByModel / byDayByProviderModel）默认日桶；
+//     custom 范围按 span 自适应：≥48h 日桶、≥6h 小时桶、≥1h 5 分钟桶、<1h 30 秒桶；
+//     30m 预设固定 30 秒桶。
+//   - speedTrend / speedTrendSamples 默认小时桶，同样按短范围降级。
+// 页面用同一函数选择 x 轴标签格式。
+
+export type TrendGran = 'day' | 'hour' | 'minute' | 'second'
+
+const MS_PER_HOUR = 3600 * 1000
+
+export function dayTrendGran(range: Range): TrendGran {
+  if (range.kind === 'preset') return range.preset === '30m' ? 'second' : 'day'
+  const span = range.to - range.from
+  if (span >= 48 * MS_PER_HOUR) return 'day'
+  if (span >= 6 * MS_PER_HOUR) return 'hour'
+  if (span >= MS_PER_HOUR) return 'minute'
+  return 'second'
+}
+
+export function hourTrendGran(range: Range): 'hour' | 'minute' | 'second' {
+  const gran = dayTrendGran(range)
+  return gran === 'day' ? 'hour' : gran
+}
+
+/** 趋势分桶 key 的 SQL 表达式（本地时区）：
+ *  day → 'YYYY-MM-DD'；hour → 'YYYY-MM-DDTHH'；
+ *  minute → 5 分钟取整的 'YYYY-MM-DDTHH:MM'；second → 30 秒取整的 'YYYY-MM-DDTHH:MM:SS' */
+function trendBucketExpr(gran: TrendGran): string {
+  const locSec = `((started_at - ${timezoneOffsetMs()})/1000)`
+  if (gran === 'day') return `strftime('%Y-%m-%d', ${locSec}, 'unixepoch')`
+  if (gran === 'hour') return `strftime('%Y-%m-%dT%H', ${locSec}, 'unixepoch')`
+  if (gran === 'minute') return `strftime('%Y-%m-%dT%H:%M', ${locSec} - (${locSec} % 300), 'unixepoch')`
+  return `strftime('%Y-%m-%dT%H:%M:%S', ${locSec} - (${locSec} % 30), 'unixepoch')`
 }
 
 /** 将 UTC epoch ms 偏移到本地时区 epoch ms 的毫秒数。
@@ -216,10 +255,9 @@ export const QUERIES = {
 
   byDay(range: Range, modelIds: readonly string[] = []): ParamQuery {
     const bind: unknown[] = []
-    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS day,
+        ${trendBucketExpr(dayTrendGran(range))} AS day,
         COUNT(*)                                            AS calls,
         SUM(computed_total_tokens)                          AS totalTokens,
         SUM(input_tokens)                                   AS inputTokens,
@@ -310,10 +348,9 @@ export const QUERIES = {
    * 4 个数值会在主线程按 model_id 单价加权成成本。
    */
   byDayByModel(range: Range): ParamQuery {
-    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS day,
+        ${trendBucketExpr(dayTrendGran(range))} AS day,
         model_id                                            AS modelId,
         SUM(input_tokens)                                   AS inputTokens,
         SUM(output_tokens)                                  AS outputTokens,
@@ -336,17 +373,18 @@ export const QUERIES = {
   },
 
   /**
-   * 速度趋势：按「本地小时桶 × model_id」聚合速度样本（见 SPEED_SAMPLE/SPEED_EXTREME）。
-   * 日/周粒度由页面在前端折叠小时桶得到，一条查询服务三种粒度。
+   * 速度趋势：按「本地时间桶 × model_id」聚合速度样本（见 SPEED_SAMPLE/SPEED_EXTREME）。
+   * 默认小时桶，短范围（<6h）自适应为 5 分钟桶（hourTrendGran）；
+   * granOverride 允许页面显式指定查询桶粒度（输出速度页 ≤7 天可选 30秒/5分钟）；
+   * 日/周粒度由页面在前端折叠小时桶得到，一条查询服务多种粒度。
    * 速度三列用 SPEED_SAMPLE（仅正常生成请求）；speedMax/speedMin 是桶内单次
    * 调用速度的极值，用 SPEED_EXTREME（解码 ≥3s 且输出 ≥32 token）。
    * ttftSumMs/ttftSampleCount 给页面的「平均首字等待」KPI 用。
    */
-  speedTrend(range: Range): ParamQuery {
-    const tzOffsetMs = timezoneOffsetMs()
+  speedTrend(range: Range, granOverride?: ReturnType<typeof hourTrendGran>): ParamQuery {
     const sql = `
       SELECT
-        strftime('%Y-%m-%dT%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS bucket,
+        ${trendBucketExpr(granOverride ?? hourTrendGran(range))} AS bucket,
         model_id                                            AS modelId,
         SUM(CASE WHEN ${SPEED_SAMPLE} THEN output_tokens ELSE 0 END) AS speedOutputTokens,
         SUM(CASE WHEN ${SPEED_SAMPLE} THEN duration_ms - time_to_first_token_ms ELSE 0 END) AS speedDurationMs,
@@ -364,15 +402,15 @@ export const QUERIES = {
   },
 
   /**
-   * 速度页「中位数」口径的数据源：单次调用速度明细（本地小时桶 × model_id）。
+   * 速度页「中位数」口径的数据源：单次调用速度明细（本地时间桶 × model_id）。
+   * 桶粒度同 speedTrend（hourTrendGran，短范围为 5 分钟桶；granOverride 同样可覆盖）。
    * 中位数无法像 SUM/MAX/MIN 那样跨桶合并，所以把明细交给前端按目标粒度折叠后计算。
    * 口径同 SPEED_SAMPLE（仅正常生成请求）。
    */
-  speedTrendSamples(range: Range): ParamQuery {
-    const tzOffsetMs = timezoneOffsetMs()
+  speedTrendSamples(range: Range, granOverride?: ReturnType<typeof hourTrendGran>): ParamQuery {
     const sql = `
       SELECT
-        strftime('%Y-%m-%dT%H', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS bucket,
+        ${trendBucketExpr(granOverride ?? hourTrendGran(range))} AS bucket,
         model_id                                            AS modelId,
         output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) AS speedTokPerS
       FROM model_usage
@@ -505,10 +543,9 @@ export const QUERIES = {
    */
   byDayByProviderModel(range: Range, providerId: string, modelId: string): ParamQuery {
     const bind: unknown[] = [providerId, modelId]
-    const tzOffsetMs = timezoneOffsetMs()
     const sql = `
       SELECT
-        strftime('%Y-%m-%d', (started_at - ${tzOffsetMs})/1000, 'unixepoch') AS day,
+        ${trendBucketExpr(dayTrendGran(range))} AS day,
         SUM(input_tokens)                                   AS inputTokens,
         SUM(output_tokens)                                  AS outputTokens,
         SUM(reasoning_tokens)                               AS reasoningTokens,

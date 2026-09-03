@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'preact/hooks'
-import { UPlotChart } from '../ui/uplot-chart.tsx'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { UPlotChart, bucketKeyToX } from '../ui/uplot-chart.tsx'
 import type { AlignedData } from 'uplot'
 import { SegmentedControl } from '../ui/segmented-control.tsx'
 import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
 import { useQuery } from '../lib/use-query.ts'
-import { QUERIES, rangeSignature, shapeSpeedTrend, shapeSpeedTrendSamples } from '../db/queries.ts'
+import { QUERIES, rangeSignature, shapeSpeedTrend, shapeSpeedTrendSamples, hourTrendGran } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { SpeedTrendRow, SpeedSampleRow } from '../db/types.ts'
 import {
@@ -28,7 +28,12 @@ const GRAN_ITEMS = [
   { id: 'day', label: '日' },
   { id: 'week', label: '周' },
 ] as const
-type Gran = (typeof GRAN_ITEMS)[number]['id']
+type Gran = 'second' | 'minute' | (typeof GRAN_ITEMS)[number]['id']
+
+/** 细粒度折叠选项：跨度 ≤7 天的范围（近30分钟/近7天/自定义）提供 */
+const MINUTE_GRAN_ITEM = { id: 'minute', label: '5分钟' } as const
+const SECOND_GRAN_ITEM = { id: 'second', label: '30秒' } as const
+const FINE_GRAN_ITEMS = [SECOND_GRAN_ITEM, MINUTE_GRAN_ITEM, ...GRAN_ITEMS]
 
 type TopN = '5' | '8' | 'all'
 
@@ -50,12 +55,36 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
   const [topN, setTopN] = useState<TopN>('8')
   const [statMode, setStatMode] = useState<StatMode>('avg')
 
+  // 跨度 ≤7 天的范围（近30分钟/近7天/自定义短范围）提供 30秒/5分钟 细粒度选项；
+  // 近30天/全部数据量过大（30 秒 × 30 天 ≈ 8.6 万桶 × 模型数），不提供
+  const fineAllowed =
+    range.kind === 'custom'
+      ? range.to - range.from <= 7 * 86400 * 1000
+      : range.preset === '30m' || range.preset === '7d'
+  const granItems = fineAllowed ? FINE_GRAN_ITEMS : GRAN_ITEMS
+  // 范围自带的 SQL 桶粒度：短范围（<1h，含近30分钟）为 30 秒桶、1–6h 为 5 分钟桶
+  const autoGran = hourTrendGran(range)
+  useEffect(() => {
+    if (autoGran === 'second' && gran !== 'second') setGran('second')
+    else if (autoGran === 'minute' && gran !== 'minute' && gran !== 'hour') setGran('minute')
+    else if (autoGran === 'hour' && gran !== 'hour' && gran !== 'day' && gran !== 'week') setGran('day')
+    // gran 变化由用户交互触发，这里只在范围粒度切换时纠正。
+    // 依赖需含 fineAllowed：近7天选了 30 秒再切近30天时 autoGran 不变，
+    // 必须靠 fineAllowed 翻转触发收敛，否则选中态悬空且隐式触发大范围细粒度查询
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoGran, fineAllowed])
+
+  // 查询桶粒度：用户选了细粒度（30秒/5分钟）就按该粒度直接分桶；
+  // 小时/日/周仍按范围自带的桶查询（小时或更细），前端折叠
+  const sqlGran: 'hour' | 'minute' | 'second' =
+    gran === 'second' || gran === 'minute' ? gran : autoGran
+
   // marks 不影响 SQL 结果（速度与计价无关），只影响前端分组 → 不进 query key
   const state = useQuery<SpeedTrendRow[]>(
     db,
-    `speed:${rangeSignature(range)}`,
+    `speed:${rangeSignature(range)}:${sqlGran}`,
     async (d) => {
-      const q = QUERIES.speedTrend(range)
+      const q = QUERIES.speedTrend(range, sqlGran)
       return shapeSpeedTrend(await d.select(q.sql, q.bind))
     },
   )
@@ -63,9 +92,9 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
   // 中位数明细：db 传 null 时 hook 保持 loading → 只在切到中位数口径时才真正查询
   const samples = useQuery<SpeedSampleRow[]>(
     statMode === 'median' ? db : null,
-    `speed-samples:${rangeSignature(range)}`,
+    `speed-samples:${rangeSignature(range)}:${sqlGran}`,
     async (d) => {
-      const q = QUERIES.speedTrendSamples(range)
+      const q = QUERIES.speedTrendSamples(range, sqlGran)
       return shapeSpeedTrendSamples(await d.select(q.sql, q.bind))
     },
   )
@@ -100,7 +129,19 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
   const fastest = statMode === 'median' ? medianKpis?.fastest ?? null : kpis?.fastest ?? null
 
   const xFormat =
-    gran === 'hour'
+    gran === 'second'
+      ? (v: number) => {
+          const d = new Date(v * 1000)
+          const p = (n: number) => String(n).padStart(2, '0')
+          return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+        }
+      : gran === 'minute'
+      ? (v: number) => {
+          const d = new Date(v * 1000)
+          const p = (n: number) => String(n).padStart(2, '0')
+          return `${p(d.getHours())}:${p(d.getMinutes())}`
+        }
+      : gran === 'hour'
       ? (v: number) => {
           const d = new Date(v * 1000)
           const hh = String(d.getHours()).padStart(2, '0')
@@ -146,7 +187,7 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
             value={gran}
             onChange={setGran}
             ariaLabel="时间粒度"
-            items={GRAN_ITEMS}
+            items={granItems}
           />
           <RangeSelectorTabs state={rs} ariaLabel="时间范围" />
         </div>
@@ -214,9 +255,11 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
   )
 }
 
-/** 折叠到目标粒度的桶 key：小时原样；日取前 10 位；周归到本地周一 */
+/** 折叠到目标粒度的桶 key：30秒原样；5分钟取前 16 位；小时取前 13 位；日取前 10 位；周归到本地周一 */
 function foldKey(bucket: string, gran: Gran): string {
-  if (gran === 'hour') return bucket
+  if (gran === 'second') return bucket
+  if (gran === 'minute') return bucket.slice(0, 16)
+  if (gran === 'hour') return bucket.slice(0, 13)
   const day = bucket.slice(0, 10)
   if (gran === 'day') return day
   const d = new Date(`${day}T00:00:00`)
@@ -226,14 +269,8 @@ function foldKey(bucket: string, gran: Gran): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
-/** 桶 key → x（unix 秒）。'YYYY-MM-DDTHH' 取该整点，'YYYY-MM-DD' 取本地午夜 */
-function keyToX(key: string): number {
-  const t = key.length > 10 ? `${key.slice(0, 10)}T${key.slice(11, 13)}:00:00` : `${key}T00:00:00`
-  return Math.floor(Date.parse(t) / 1000)
-}
-
 function alignedData(keys: readonly string[], ys: readonly (readonly (number | null)[])[]): AlignedData {
-  return [keys.map(keyToX), ...ys.map((arr) => Array.from(arr))]
+  return [keys.map(bucketKeyToX), ...ys.map((arr) => Array.from(arr))]
 }
 
 type SpeedBucket = {
