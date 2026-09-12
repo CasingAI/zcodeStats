@@ -30,7 +30,7 @@ function safeParse(raw: string | null): Range | null {
     const v: unknown = JSON.parse(raw)
     if (!v || typeof v !== 'object') return null
     const o = v as Record<string, unknown>
-    if (o.kind === 'preset' && (o.preset === '7d' || o.preset === '30d' || o.preset === 'all')) {
+    if (o.kind === 'preset' && (o.preset === '30m' || o.preset === '7d' || o.preset === '30d' || o.preset === 'all')) {
       return { kind: 'preset', preset: o.preset }
     }
     if (o.kind === 'custom' && typeof o.from === 'number' && typeof o.to === 'number') {

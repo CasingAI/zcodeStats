@@ -1,5 +1,5 @@
-import { useState } from 'preact/hooks'
-import { UPlotChart, toTimeAlignedData } from '../ui/uplot-chart.tsx'
+import { useEffect, useState } from 'preact/hooks'
+import { UPlotChart, toTimeAlignedData, trendXFormat } from '../ui/uplot-chart.tsx'
 import { SegmentedControl } from '../ui/segmented-control.tsx'
 import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
@@ -7,13 +7,15 @@ import { useQuery } from '../lib/use-query.ts'
 import {
   QUERIES,
   rangeSignature,
-  shapeByDay,
-  shapeByDayByModel,
-  aggregateCostByDay,
+  shapeTrend,
+  shapeTrendByModel,
+  aggregateCostByBucket,
+  trendGran,
+  type TrendGran,
   type ParamQuery,
 } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
-import type { ByDayRow, ByDayByModelRow } from '../db/types.ts'
+import type { TrendRow, TrendByModelRow } from '../db/types.ts'
 import {
   useMarks,
   useCustomModels,
@@ -36,33 +38,73 @@ type Metric = 'token' | 'cost' | 'speed' | 'ttft'
 type Dim = 'total' | 'model'
 type TopN = '5' | '8' | 'all'
 
+const GRAN_ITEMS = [
+  { id: 'hour', label: '小时' },
+  { id: 'day', label: '日' },
+  { id: 'week', label: '周' },
+  { id: 'month', label: '月' },
+] as const
+type Gran = TrendGran
+
+/** 细粒度选项：跨度 ≤7 天的范围提供（与速度页同一规则） */
+const SECOND_GRAN_ITEM = { id: 'second', label: '30秒' } as const
+const MINUTE_GRAN_ITEM = { id: 'minute', label: '5分钟' } as const
+const FINE_GRAN_ITEMS = [SECOND_GRAN_ITEM, MINUTE_GRAN_ITEM, ...GRAN_ITEMS]
+
+/** 各粒度的中文文案：short 用于「日成本/周均成本」类标签，unit 用于 KPI 副文案计数，max 为峰值卡标题 */
+const GRAN_TEXT: Record<Gran, { short: string; unit: string; max: string }> = {
+  second: { short: '每 30 秒', unit: '个 30 秒桶', max: '单桶最高成本' },
+  minute: { short: '每 5 分钟', unit: '个 5 分钟桶', max: '单桶最高成本' },
+  hour: { short: '每小时', unit: '个小时', max: '单桶最高成本' },
+  day: { short: '日', unit: '天', max: '最高单日成本' },
+  week: { short: '周', unit: '周', max: '最高单周成本' },
+  month: { short: '月', unit: '个月', max: '最高单月成本' },
+}
+
 const modelPaths = splinePaths()
 
-export function ByDayPage({ db }: { db: OpenedDb }) {
+export function TrendPage({ db }: { db: OpenedDb }) {
   const { range, setPreset, setCustom } = useRange()
   const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
   const [metric, setMetric] = useState<Metric>('token')
   const [dim, setDim] = useState<Dim>('total')
   const [topN, setTopN] = useState<TopN>('8')
+  const [gran, setGran] = useState<Gran>('day')
   const marks = useMarks()
   const custom = useCustomModels()
 
-  const state = useQuery<{ rows: ByDayRow[]; byModel: ByDayByModelRow[]; totalCost: number; activeDays: number }>(
+  // 跨度 ≤7 天的范围（近30分钟/近7天/自定义短范围）提供 30秒/5分钟 细粒度选项；
+  // 近30天/全部数据量过大，不提供（与速度页同一规则）
+  const fineAllowed =
+    range.kind === 'custom'
+      ? range.to - range.from <= 7 * 86400 * 1000
+      : range.preset === '30m' || range.preset === '7d'
+  const granItems = fineAllowed ? FINE_GRAN_ITEMS : GRAN_ITEMS
+  // 范围的自然粒度：短范围默认细粒度、长范围默认日桶
+  const naturalGran = trendGran(range)
+  // 范围变化（或细粒度可选集翻转）时把粒度重置为自然粒度；此后用户可手动切换
+  useEffect(() => {
+    setGran(naturalGran)
+  }, [naturalGran, fineAllowed])
+
+  // 所选粒度直接作为 granOverride 传给 SQL 分桶；
+  // 桶内速度/TTFT 均值由 SQL 按原始 SUM 重算，粒度变化不影响口径
+  const state = useQuery<{ rows: TrendRow[]; byModel: TrendByModelRow[]; totalCost: number; bucketCount: number }>(
     db,
-    `by-day:${rangeSignature(range)}:${marksSignature(marks, custom)}`,
+    `trend:${rangeSignature(range)}:${gran}:${marksSignature(marks, custom)}`,
     async (d) => {
-      const dayQ: ParamQuery = QUERIES.byDay(range)
-      const dbyM: ParamQuery = QUERIES.byDayByModel(range)
+      const dayQ: ParamQuery = QUERIES.trend(range, [], gran)
+      const dbyM: ParamQuery = QUERIES.trendByModel(range, gran)
       const [dayR, dbyMR] = await Promise.all([
         d.select(dayQ.sql, dayQ.bind),
         d.select(dbyM.sql, dbyM.bind),
       ])
-      const byModel = shapeByDayByModel(dbyMR)
-      const costMap = aggregateCostByDay(byModel)
-      const rows = shapeByDay(dayR, costMap)
+      const byModel = shapeTrendByModel(dbyMR)
+      const costMap = aggregateCostByBucket(byModel)
+      const rows = shapeTrend(dayR, costMap)
       let totalCost = 0
       for (const r of rows) totalCost += r.cost
-      return { rows, byModel, totalCost, activeDays: rows.length }
+      return { rows, byModel, totalCost, bucketCount: rows.length }
     },
   )
 
@@ -71,14 +113,22 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
       ? buildModelSeries(state.data.byModel, state.data.rows.map((r) => r.day), metric, topN, marks)
       : null
 
+  // KPI 文案跟着所选粒度走
+  const bucketCount = state.kind === 'ok' ? state.data.bucketCount : 0
+  const granText = GRAN_TEXT[gran]
+  const avgLabel =
+    gran === 'day' || gran === 'week' || gran === 'month' ? `${granText.short}均成本` : `${granText.short}成本`
+  const avgSub = `${bucketCount} ${granText.unit}`
+  const maxLabel = granText.max
+
   return (
     <div class="page">
       <div class="section__header">
         <div>
-          <h1 class="page__title">按日趋势</h1>
+          <h1 class="page__title">趋势</h1>
           <p class="page__subtitle">悬浮查看数值；图例可点击隐藏/显示单条线，悬停可聚焦该系列</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <SegmentedControl<Dim>
             value={dim}
             onChange={setDim}
@@ -111,6 +161,12 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
               { id: 'ttft', label: 'TTFT' },
             ]}
           />
+          <SegmentedControl<Gran>
+            value={gran}
+            onChange={setGran}
+            ariaLabel="时间粒度"
+            items={granItems}
+          />
           <RangeSelectorTabs state={rs} ariaLabel="时间范围" />
         </div>
       </div>
@@ -133,15 +189,15 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
                 sub="按内置价目表估算"
               />
               <KpiCard
-                label="日均成本"
+                label={avgLabel}
                 tone="default"
                 value={formatRMB(
-                  state.data.activeDays > 0 ? state.data.totalCost / state.data.activeDays : 0,
+                  state.data.bucketCount > 0 ? state.data.totalCost / state.data.bucketCount : 0,
                 )}
-                sub={`${state.data.activeDays} 天`}
+                sub={avgSub}
               />
               <KpiCard
-                label="最高单日成本"
+                label={maxLabel}
                 tone="default"
                 value={formatRMB(
                   state.data.rows.reduce((m, r) => (r.cost > m ? r.cost : m), 0),
@@ -157,22 +213,16 @@ export function ByDayPage({ db }: { db: OpenedDb }) {
                 height={300}
                 seriesDefs={modelSeries.defs}
                 yFormat={metricFormatter(metric)}
-                xFormat={(v) => {
-                  const d = new Date(v * 1000)
-                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
-                }}
+                xFormat={trendXFormat(range, gran)}
               />
             ) : (
               <UPlotChart
                 data={buildData(state.data.rows, metric)}
                 time
                 height={280}
-                seriesDefs={totalSeries(metric)}
+                seriesDefs={totalSeries(metric, gran)}
                 yFormat={metricFormatter(metric)}
-                xFormat={(v) => {
-                  const d = new Date(v * 1000)
-                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
-                }}
+                xFormat={trendXFormat(range, gran)}
               />
             )}
           </>
@@ -207,16 +257,18 @@ const tokenSeries = [
   },
 ]
 
-const costSeries = [
-  {
-    label: '日成本 (¥)',
-    stroke: '#1f6ec7',
-    width: 2,
-    fill: 'rgba(47, 135, 226, 0.10)',
-    value: (_u: unknown, _raw: unknown, v: number | null) =>
-      v == null ? '—' : formatRMB(v),
-  },
-]
+function costSeries(gran: Gran) {
+  return [
+    {
+      label: `${GRAN_TEXT[gran].short}成本 (¥)`,
+      stroke: '#1f6ec7',
+      width: 2,
+      fill: 'rgba(47, 135, 226, 0.10)',
+      value: (_u: unknown, _raw: unknown, v: number | null) =>
+        v == null ? '—' : formatRMB(v),
+    },
+  ]
+}
 
 const speedSeries = [
   {
@@ -240,8 +292,8 @@ const ttftSeries = [
   },
 ]
 
-function totalSeries(metric: Metric) {
-  if (metric === 'cost') return costSeries
+function totalSeries(metric: Metric, gran: Gran) {
+  if (metric === 'cost') return costSeries(gran)
   if (metric === 'speed') return speedSeries
   if (metric === 'ttft') return ttftSeries
   return tokenSeries
@@ -254,10 +306,10 @@ function metricFormatter(metric: Metric) {
   return (v: number) => (Math.abs(v) >= 1000 ? formatCount(v) : String(Math.round(v)))
 }
 
-function buildData(rows: ByDayRow[], metric: Metric) {
+function buildData(rows: TrendRow[], metric: Metric) {
   const days = rows.map((r) => r.day)
   if (metric === 'cost') return toTimeAlignedData(days, [rows.map((r) => r.cost)])
-  // 无样本的天保留 null（uPlot 断线），避免画成 0 造成"当天速度/TTFT 为 0"的误读
+  // 无样本的桶保留 null（uPlot 断线），避免画成 0 造成"该桶速度/TTFT 为 0"的误读
   if (metric === 'speed') {
     return toTimeAlignedData(days, [rows.map((r) => r.avgOutputSpeed)])
   }
@@ -293,9 +345,9 @@ type TimingBucket = {
   ttftSampleCount: number
   totalDurationMs: number
   durationSampleCount: number
-  /** 当日 token 总量（含 reasoning，与 computed_total_tokens 同口径） */
+  /** 桶内 token 总量（含 reasoning，与 computed_total_tokens 同口径） */
   tokens: number
-  /** 当日成本 ¥（按底层 model_id 各自计价后累加） */
+  /** 桶内成本 ¥（按底层 model_id 各自计价后累加） */
   cost: number
 }
 
@@ -321,12 +373,12 @@ function bucketValue(metric: Metric, b: TimingBucket): number | null {
 }
 
 /**
- * 把「日 × model_id」行按模型组展开成多条 y 序列。
+ * 把「桶 × model_id」行按模型组展开成多条 y 序列。
  * 组 key 走 resolveGroupKey（尊重标记/改名），按区间总量降序取 Top N，
- * 未入选的模型合并为「其他」；缺数据的天：token/成本为 0，速度/TTFT 为 null（断线）。
+ * 未入选的模型合并为「其他」；缺数据的桶：token/成本为 0，速度/TTFT 为 null（断线）。
  */
 function buildModelSeries(
-  rows: readonly ByDayByModelRow[],
+  rows: readonly TrendByModelRow[],
   days: readonly string[],
   metric: Metric,
   topN: TopN,

@@ -28,6 +28,8 @@ export type ModelPrice = {
 
 const TABLE: Record<string, ModelPrice> = {
   'deepseek-v4-flash': { input: 3.0, output: 9.0, cacheInput: 0.1 },
+  // DeepSeek-V4.1-Flash（API 名 deepseek-flash），高峰档价：输入 2 / 输出 8 / 缓存命中 0.04
+  'deepseek-v4.1-flash': { input: 2.0, output: 8.0, cacheInput: 0.04 },
   'deepseek-v4-pro': { input: 9.0, output: 27.0, cacheInput: 0.3 },
   'minimax-m3': { input: 4.2, output: 16.8, cacheInput: 0.84 },
   'GLM-5.3-Flash': { input: 0.4, output: 1.4, cacheInput: 0.115 },
@@ -43,6 +45,7 @@ const TABLE: Record<string, ModelPrice> = {
   'grok-4.3': { input: 9.0, output: 18.0, cacheInput: 1.44 },
   'grok-4.20': { input: 9.0, output: 18.0, cacheInput: 1.44 },
   'grok-build-0.1': { input: 7.2, output: 14.4, cacheInput: 1.44 },
+  'gpt-6-astra': { input: 72.0, output: 360.0, cacheInput: 7.2 },
   'gpt-5.6-sol': { input: 36.0, output: 216.0, cacheInput: 3.6 },
   'gpt-5.6-terra': { input: 14.4, output: 86.4, cacheInput: 1.44 },
   'gpt-5.6-luna': { input: 1.44, output: 8.64, cacheInput: 0.14 },
@@ -86,7 +89,11 @@ const BUILTIN_ALIASES_LC: Record<string, string> = {
   'minimax-m3:free': 'minimax-m3',
   'deepseek-latest': 'deepseek-v4-flash',
   'deepseek-latest:free': 'deepseek-v4-flash',
+  'deepseek-flash': 'deepseek-v4.1-flash',
   'cursor-grok-4.6-high': 'grok-4.6',
+  'k3': 'Kimi K3',
+  'k3-256k': 'Kimi K3',
+  'kimi-k3': 'Kimi K3',
 }
 
 // ---- 用户注入的注册表 ----
@@ -119,6 +126,7 @@ export function builtinModelKeys(): string[] {
  */
 const DISPLAY_NAMES: Record<string, string> = {
   'deepseek-v4-flash': 'DeepSeek V4 Flash',
+  'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
   'deepseek-v4-pro': 'DeepSeek V4 Pro',
   minimax: 'MiniMax M3',
   'minimax-m3': 'MiniMax M3',
@@ -135,6 +143,7 @@ const DISPLAY_NAMES: Record<string, string> = {
   'grok-4.3': 'Grok 4.3',
   'grok-4.20': 'Grok 4.20',
   'grok-build-0.1': 'Grok Build 0.1',
+  'gpt-6-astra': 'GPT-6 Astra',
   'gpt-5.6-sol': 'GPT-5.6 Sol',
   'gpt-5.6-terra': 'GPT-5.6 Terra',
   'gpt-5.6-luna': 'GPT-5.6 Luna',

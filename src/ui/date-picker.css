@@ -19,7 +19,7 @@
 }
 
 .date-picker__input {
-  width: 130px;
+  width: 175px; /* datetime-local 需要 "YYYY-MM-DD HH:mm" 的完整宽度 */
   text-align: center;
   font-variant-numeric: tabular-nums;
 }

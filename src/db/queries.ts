@@ -12,12 +12,12 @@
 //   tool_usage.tool_name, duration_ms, output_bytes, status
 
 import type {
-  ByDayByModelRow,
+  TrendByModelRow,
   ByPromptByModelRow,
   ByPromptDetailRow,
   ByPromptSummaryRow,
   BySessionByModelRow,
-  ByDayRow,
+  TrendRow,
   ByHourGrid,
   ByModelRow,
   ByProviderModelRow,
@@ -63,17 +63,18 @@ function rangeClause(range: Range): string {
 // ---- 趋势分桶粒度 ----
 //
 // 范围越短桶越大粒度，否则短范围下趋势图只剩 1 个点：
-//   - byDay 系列（byDay / byDayByModel / byDayByProviderModel）默认日桶；
+//   - trend 系列（trend / trendByModel / trendByProviderModel）默认日桶；
 //     custom 范围按 span 自适应：≥48h 日桶、≥6h 小时桶、≥1h 5 分钟桶、<1h 30 秒桶；
-//     30m 预设固定 30 秒桶。
+//     30m 预设固定 30 秒桶；granOverride 允许页面显式指定档位
+//     （趋势页的小时/日/周/月选择器；周桶归并到本地周一，月桶 key 为 'YYYY-MM'）。
 //   - speedTrend / speedTrendSamples 默认小时桶，同样按短范围降级。
 // 页面用同一函数选择 x 轴标签格式。
 
-export type TrendGran = 'day' | 'hour' | 'minute' | 'second'
+export type TrendGran = 'day' | 'hour' | 'minute' | 'second' | 'week' | 'month'
 
 const MS_PER_HOUR = 3600 * 1000
 
-export function dayTrendGran(range: Range): TrendGran {
+export function trendGran(range: Range): TrendGran {
   if (range.kind === 'preset') return range.preset === '30m' ? 'second' : 'day'
   const span = range.to - range.from
   if (span >= 48 * MS_PER_HOUR) return 'day'
@@ -83,16 +84,21 @@ export function dayTrendGran(range: Range): TrendGran {
 }
 
 export function hourTrendGran(range: Range): 'hour' | 'minute' | 'second' {
-  const gran = dayTrendGran(range)
-  return gran === 'day' ? 'hour' : gran
+  const gran = trendGran(range)
+  return gran === 'day' || gran === 'week' || gran === 'month' ? 'hour' : gran
 }
 
 /** 趋势分桶 key 的 SQL 表达式（本地时区）：
- *  day → 'YYYY-MM-DD'；hour → 'YYYY-MM-DDTHH'；
- *  minute → 5 分钟取整的 'YYYY-MM-DDTHH:MM'；second → 30 秒取整的 'YYYY-MM-DDTHH:MM:SS' */
-function trendBucketExpr(gran: TrendGran): string {
+ *  day → 'YYYY-MM-DD'；week → 当周本地周一的 'YYYY-MM-DD'（%w 周日=0，回退 0–6 天）；
+ *  month → 'YYYY-MM'；hour → 'YYYY-MM-DDTHH'；
+ *  minute → 5 分钟取整的 'YYYY-MM-DDTHH:MM'；second → 30 秒取整的 'YYYY-MM-DDTHH:MM:SS'
+ *  导出供 worker 的 thinking 聚合复用（与页面同一套本地时区口径）。 */
+export function trendBucketExpr(gran: TrendGran): string {
   const locSec = `((started_at - ${timezoneOffsetMs()})/1000)`
   if (gran === 'day') return `strftime('%Y-%m-%d', ${locSec}, 'unixepoch')`
+  if (gran === 'week')
+    return `strftime('%Y-%m-%d', ${locSec} - (((strftime('%w', ${locSec}, 'unixepoch') + 6) % 7) * 86400), 'unixepoch')`
+  if (gran === 'month') return `strftime('%Y-%m', ${locSec}, 'unixepoch')`
   if (gran === 'hour') return `strftime('%Y-%m-%dT%H', ${locSec}, 'unixepoch')`
   if (gran === 'minute') return `strftime('%Y-%m-%dT%H:%M', ${locSec} - (${locSec} % 300), 'unixepoch')`
   return `strftime('%Y-%m-%dT%H:%M:%S', ${locSec} - (${locSec} % 30), 'unixepoch')`
@@ -126,16 +132,27 @@ const SPEED_VALID =
   'AND time_to_first_token_ms >= 0 AND time_to_first_token_ms < duration_ms'
 
 /**
- * 速度页专用样本口径：在 SPEED_VALID 之上仅保留正常生成请求。
+ * 合理解码速度上限（tok/s）。实测全库 ≥500 tok/s 的样本（333 条）解码窗口全部
+ * ≤596ms——「首 token 后整段响应一次性到达」的供应商流式伪影（ttft≈总时长）；
+ * 而过 ≥3s 窗口门槛后的真实持续解码最高 429 tok/s（deepseek-v4-flash，窗口 3.3s）。
+ * 500 恰好切掉全部伪影、完整保留真实高速解码。导出给速度页副标题复用。
+ */
+export const SPEED_CAP_TOK_PER_S = 500
+
+/**
+ * 速度页专用样本口径：在 SPEED_VALID 之上仅保留正常生成请求，且剔除速度超过
+ * SPEED_CAP_TOK_PER_S 的整段到达伪影——平均/中位数明细与最大/最小同受此保护。
  * query_source 白名单实测：极值失真（解码窗口 9~36ms 上万 tok/s）全部来自
  * main_turn / subagent 的短窗口调用；compact / session_title 等辅助请求
  * 虽非失真来源，但它们不是「生成」行为，同样不计入速度页。
+ * 分母为正由 SPEED_VALID 保证（ttft 非空、≥0 且 < duration_ms）。
  */
 const SPEED_SAMPLE =
-  `(${SPEED_VALID}) AND query_source IN ('main_turn', 'subagent')`
+  `(${SPEED_VALID}) AND query_source IN ('main_turn', 'subagent') ` +
+  `AND output_tokens * 1000.0 / (duration_ms - time_to_first_token_ms) <= ${SPEED_CAP_TOK_PER_S}`
 
 /**
- * 速度页极值（最大/最小）口径：在 SPEED_SAMPLE 之上要求解码窗口 ≥3s
+ * 速度页极值（最大/最小）口径：在 SPEED_SAMPLE（含速度上限）之上要求解码窗口 ≥3s
  * 且输出 ≥32 token，剔除短窗口计时噪声（假快）与流中途卡顿（假慢）。
  * 实测近 7 天 max 19,631 → 429 tok/s；仅用于 speedTrend 的 MAX/MIN 两列。
  */
@@ -253,11 +270,11 @@ export const QUERIES = {
     return { sql }
   },
 
-  byDay(range: Range, modelIds: readonly string[] = []): ParamQuery {
+  trend(range: Range, modelIds: readonly string[] = [], granOverride?: TrendGran): ParamQuery {
     const bind: unknown[] = []
     const sql = `
       SELECT
-        ${trendBucketExpr(dayTrendGran(range))} AS day,
+        ${trendBucketExpr(granOverride ?? trendGran(range))} AS day,
         COUNT(*)                                            AS calls,
         SUM(computed_total_tokens)                          AS totalTokens,
         SUM(input_tokens)                                   AS inputTokens,
@@ -344,13 +361,13 @@ export const QUERIES = {
   },
 
   /**
-   * 按"日 × model_id"展开：每行 4 项分项 token，用于按日成本曲线。每行的
+   * 按"桶 × model_id"展开：每行 4 项分项 token，用于成本曲线。每行的
    * 4 个数值会在主线程按 model_id 单价加权成成本。
    */
-  byDayByModel(range: Range): ParamQuery {
+  trendByModel(range: Range, granOverride?: TrendGran): ParamQuery {
     const sql = `
       SELECT
-        ${trendBucketExpr(dayTrendGran(range))} AS day,
+        ${trendBucketExpr(granOverride ?? trendGran(range))} AS day,
         model_id                                            AS modelId,
         SUM(input_tokens)                                   AS inputTokens,
         SUM(output_tokens)                                  AS outputTokens,
@@ -377,7 +394,8 @@ export const QUERIES = {
    * 默认小时桶，短范围（<6h）自适应为 5 分钟桶（hourTrendGran）；
    * granOverride 允许页面显式指定查询桶粒度（输出速度页 ≤7 天可选 30秒/5分钟）；
    * 日/周粒度由页面在前端折叠小时桶得到，一条查询服务多种粒度。
-   * 速度三列用 SPEED_SAMPLE（仅正常生成请求）；speedMax/speedMin 是桶内单次
+   * 速度三列用 SPEED_SAMPLE（仅正常生成请求且速度 ≤ SPEED_CAP_TOK_PER_S）；
+   * speedMax/speedMin 是桶内单次
    * 调用速度的极值，用 SPEED_EXTREME（解码 ≥3s 且输出 ≥32 token）。
    * ttftSumMs/ttftSampleCount 给页面的「平均首字等待」KPI 用。
    */
@@ -405,7 +423,7 @@ export const QUERIES = {
    * 速度页「中位数」口径的数据源：单次调用速度明细（本地时间桶 × model_id）。
    * 桶粒度同 speedTrend（hourTrendGran，短范围为 5 分钟桶；granOverride 同样可覆盖）。
    * 中位数无法像 SUM/MAX/MIN 那样跨桶合并，所以把明细交给前端按目标粒度折叠后计算。
-   * 口径同 SPEED_SAMPLE（仅正常生成请求）。
+   * 口径同 SPEED_SAMPLE（仅正常生成请求且速度 ≤ SPEED_CAP_TOK_PER_S）。
    */
   speedTrendSamples(range: Range, granOverride?: ReturnType<typeof hourTrendGran>): ParamQuery {
     const sql = `
@@ -541,11 +559,11 @@ export const QUERIES = {
   /**
    * 按 provider_id + model_id + day 聚合：用于供应商-模型详情页的日趋势图。
    */
-  byDayByProviderModel(range: Range, providerId: string, modelId: string): ParamQuery {
+  trendByProviderModel(range: Range, providerId: string, modelId: string): ParamQuery {
     const bind: unknown[] = [providerId, modelId]
     const sql = `
       SELECT
-        ${trendBucketExpr(dayTrendGran(range))} AS day,
+        ${trendBucketExpr(trendGran(range))} AS day,
         SUM(input_tokens)                                   AS inputTokens,
         SUM(output_tokens)                                  AS outputTokens,
         SUM(reasoning_tokens)                               AS reasoningTokens,
@@ -887,11 +905,11 @@ export function shapeByModel(
   })
 }
 
-export function shapeByDay(
+export function shapeTrend(
   r: WorkerExecResult,
-  /** 来自 byDayByModel 的成本按 day 折叠 */
-  costByDay: ReadonlyMap<string, number>,
-): ByDayRow[] {
+  /** 来自 trendByModel 的成本按桶 key 折叠 */
+  costByBucket: ReadonlyMap<string, number>,
+): TrendRow[] {
   return r.rows.map((row) => {
     const timing = computeTimingAggregates(
       toNumber(row[13]),
@@ -913,7 +931,7 @@ export function shapeByDay(
       errorCount: toNumber(row[7]),
       cacheHitRate: toNumber(row[8]),
       reasoningTokens: toNumber(row[9]),
-      cost: costByDay.get(String(row[0] ?? '')) ?? 0,
+      cost: costByBucket.get(String(row[0] ?? '')) ?? 0,
       ...timing,
     }
   })
@@ -939,9 +957,9 @@ export function shapeBySession(
   }))
 }
 
-export function shapeByDayByModel(
+export function shapeTrendByModel(
   r: WorkerExecResult,
-): ByDayByModelRow[] {
+): TrendByModelRow[] {
   return r.rows.map((row) => {
     const timing = computeTimingAggregates(
       toNumber(row[10]),
@@ -1003,9 +1021,9 @@ export function shapeSpeedTrendSamples(r: WorkerExecResult): SpeedSampleRow[] {
   }))
 }
 
-/** 给一组 ByDayByModelRow 按 day 折叠，得到 day → ¥。 */
-export function aggregateCostByDay(
-  rows: readonly ByDayByModelRow[],
+/** 给一组 TrendByModelRow 按桶 key 折叠，得到桶 key → ¥。 */
+export function aggregateCostByBucket(
+  rows: readonly TrendByModelRow[],
 ): Map<string, number> {
   const m = new Map<string, number>()
   for (const r of rows) {
@@ -1153,7 +1171,7 @@ export function shapeByProviderModel(r: WorkerExecResult): ByProviderModelRow[] 
   })
 }
 
-export function shapeByDayByProviderModel(r: WorkerExecResult): ByDayRow[] {
+export function shapeTrendByProviderModel(r: WorkerExecResult): TrendRow[] {
   return r.rows.map((row) => {
     const timing = computeTimingAggregates(
       toNumber(row[9]),

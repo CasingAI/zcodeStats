@@ -5,7 +5,7 @@ import { SegmentedControl } from '../ui/segmented-control.tsx'
 import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
 import { useQuery } from '../lib/use-query.ts'
-import { QUERIES, rangeSignature, shapeSpeedTrend, shapeSpeedTrendSamples, hourTrendGran } from '../db/queries.ts'
+import { QUERIES, rangeSignature, shapeSpeedTrend, shapeSpeedTrendSamples, hourTrendGran, SPEED_CAP_TOK_PER_S } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { SpeedTrendRow, SpeedSampleRow } from '../db/types.ts'
 import {
@@ -163,7 +163,8 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
             本页为<strong>净解码速度</strong>：仅统计主对话与子代理的正常生成请求（已剔除上下文压缩、标题生成等辅助请求），
             与总览等其他页面的平均速度口径不同。解码速度 = 输出 token ÷（总时长 − 首 token 等待），不含等首字的时间，无样本时段断线。
             统计口径：平均 = 按 token 加权；中位数 = 单次调用速度的中间值，最抗极值干扰；
-            最大/最小 = 单次调用的极值，且仅统计解码窗口 ≥3s、输出 ≥32 token 的正常长度调用
+            最大/最小 = 单次调用的极值，且仅统计解码窗口 ≥3s、输出 ≥32 token 的正常长度调用。
+            所有口径均剔除速度 &gt; {SPEED_CAP_TOK_PER_S} tok/s 的样本（首 token 后整段一次性到达的流式伪影，非真实解码速度）
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -199,7 +200,7 @@ export function SpeedPage({ db }: { db: OpenedDb }) {
         {state.kind === 'loading' && <div class="app-banner">加载中…</div>}
         {state.kind === 'error' && <div class="app-banner app-banner--error">{state.error}</div>}
         {state.kind === 'ok' && state.data.length === 0 && (
-          <div class="app-banner">所选时间窗内没有可计算解码速度的调用（需要 completed、时长 &gt; 0、有输出且记录了有效首字时间）</div>
+          <div class="app-banner">所选时间窗内没有可计算解码速度的调用（需要 completed、时长 &gt; 0、有输出且记录了有效首字时间、速度 ≤ {SPEED_CAP_TOK_PER_S} tok/s）</div>
         )}
         {state.kind === 'ok' && statMode === 'median' && samples.kind === 'loading' && (
           <div class="app-banner">中位数明细加载中…</div>

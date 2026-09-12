@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { IosButton } from './ui/ios-button.tsx'
-import { useDb } from './db/client.ts'
+import { useDb, type FsFileHandle } from './db/client.ts'
 import { ROUTES, useRoute, type RouteName } from './lib/router.ts'
 import { formatFileSize } from './lib/format.ts'
 import { OverviewPage } from './pages/overview.tsx'
@@ -9,8 +9,9 @@ import { ProviderDetailPage } from './pages/provider-detail.tsx'
 import { ProviderModelDetailPage } from './pages/provider-model-detail.tsx'
 import { ByModelPage } from './pages/by-model.tsx'
 import { ModelDetailPage } from './pages/model-detail.tsx'
-import { ByDayPage } from './pages/by-day.tsx'
+import { TrendPage } from './pages/trend.tsx'
 import { SpeedPage } from './pages/speed.tsx'
+import { ThinkingPage } from './pages/thinking.tsx'
 import { BySessionPage } from './pages/by-session.tsx'
 import { ByHourPage } from './pages/by-hour.tsx'
 import { ByToolPage } from './pages/by-tool.tsx'
@@ -26,7 +27,10 @@ export function App() {
 
   // 全屏 drag/drop：Finder 拖 db.sqlite 到任意位置都接。
   const [dragHover, setDragHover] = useState(false)
-  const [replaceCandidate, setReplaceCandidate] = useState<File | null>(null)
+  const [replaceCandidate, setReplaceCandidate] = useState<{
+    file: File
+    handle: FsFileHandle | null
+  } | null>(null)
   // 第一次点 "打开 db.sqlite" 时先弹 OS 路径说明，避免用户去找隐藏目录。
   const [showPathHint, setShowPathHint] = useState(false)
 
@@ -51,15 +55,29 @@ export function App() {
       setDragHover(false)
       const file = ev.dataTransfer?.files?.[0]
       if (!file) return
-      if (state.kind === 'ready') {
-        // 已开着 db，先弹确认
-        setReplaceCandidate(file)
-      } else {
-        void openDroppedFile(file).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err)
-          window.alert(msg)
-        })
-      }
+      // getAsFileSystemHandle 必须在事件处理内同步调用，异步之后 items 就失效了。
+      // 拿到 handle 才能在文件快照失效时自愈；拿不到（Firefox/Safari）也不影响打开。
+      const fileItem = Array.from(ev.dataTransfer?.items ?? []).find((it) => it.kind === 'file')
+      const getHandle = (
+        fileItem as
+          | (DataTransferItem & { getAsFileSystemHandle?: () => Promise<FileSystemFileHandle | null> })
+          | undefined
+      )?.getAsFileSystemHandle?.bind(fileItem)
+      const handlePromise: Promise<FileSystemFileHandle | null> | undefined = getHandle
+        ? getHandle().catch(() => null)
+        : undefined
+      void (async () => {
+        const handle = handlePromise ? await handlePromise : null
+        if (state.kind === 'ready') {
+          // 已开着 db，先弹确认
+          setReplaceCandidate({ file, handle })
+        } else {
+          await openDroppedFile(file, handle)
+        }
+      })().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        window.alert(msg)
+      })
     }
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
@@ -72,11 +90,11 @@ export function App() {
   }, [state.kind, openDroppedFile])
 
   const confirmReplace = () => {
-    const file = replaceCandidate
+    const candidate = replaceCandidate
     setReplaceCandidate(null)
-    if (!file) return
+    if (!candidate) return
     close()
-    void openDroppedFile(file).catch((err: unknown) => {
+    void openDroppedFile(candidate.file, candidate.handle).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       window.alert(msg)
     })
@@ -152,7 +170,7 @@ export function App() {
             <div class="app-modal__title">替换当前数据库？</div>
             <div class="app-modal__body">
               当前已打开 <strong>{state.kind === 'ready' ? state.db.file.name : ''}</strong>，
-              将被 <strong>{replaceCandidate.name}</strong> 替换。
+              将被 <strong>{replaceCandidate.file.name}</strong> 替换。
             </div>
             <div class="app-modal__actions">
               <IosButton tone="secondary" size="compact" onClick={() => setReplaceCandidate(null)}>
@@ -250,10 +268,12 @@ function PageHost({
       return <ByModelPage db={state.db} />
     case 'model':
       return <ModelDetailPage db={state.db} group={param} />
-    case 'by-day':
-      return <ByDayPage db={state.db} />
+    case 'trend':
+      return <TrendPage db={state.db} />
     case 'speed':
       return <SpeedPage db={state.db} />
+    case 'thinking':
+      return <ThinkingPage db={state.db} />
     case 'by-session':
       return <BySessionPage db={state.db} />
     case 'by-hour':
@@ -304,7 +324,8 @@ function IdleView({ state }: { state: ReturnType<typeof useDb>['state'] }) {
 1) 直接从 Finder / 资源管理器拖 db.sqlite 进来 — 最稳；
 2) 点右上角 "打开 db.sqlite"，按提示找到隐藏目录 ~/.zcode/cli/db/（macOS 选目录时按 ⌘Shift+.）。
 
-ZCode 运行中通常也能打开（immutable=1 跳过锁），但 WAL 里未 checkpoint 的最新数据可能读不到 — 想要最新数据建议先 ⌘Q 退出 ZCode。`}
+ZCode 运行中通常也能打开（immutable=1 跳过锁），但 WAL 里未 checkpoint 的最新数据可能读不到 — 想要最新数据建议先 ⌘Q 退出 ZCode。
+ZCode 运行中持续写入导致文件快照失效时，查询会自动重取新快照继续工作，无需重新拖入（Chromium 系浏览器）。`}
       />
     </div>
   )

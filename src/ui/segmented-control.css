@@ -2,21 +2,22 @@
   --segmented-count: 1;
   --segmented-index: 0;
   position: relative;
-  display: flex;
+  display: inline-flex;
   gap: 0;
   padding: 2px;
   border: 1px solid #888;
   border-radius: 4px;
   background: linear-gradient(180deg, #d4d4d4 0%, #ebebeb 100%);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
-  min-width: 150px;
 }
 
+/* thumb 几何由 JS 按激活段实测（段宽随文案自然变化）；以下等分公式仅作
+   首帧测量前的兜底，测量完成后被内联 style 覆盖 */
 .segmented-control__thumb {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  left: 2px;
+  left: 0;
   z-index: 0;
   width: calc((100% - 4px) / var(--segmented-count));
   border-radius: 3px;
@@ -24,7 +25,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
     0 1px 1px rgba(0, 0, 0, 0.12);
-  transform: translateX(calc(var(--segmented-index) * 100%));
+  transform: translateX(calc(var(--segmented-index) * 100% + 2px));
   pointer-events: none;
 }
 
@@ -36,11 +37,9 @@
   appearance: none;
   position: relative;
   z-index: 1;
-  flex: 1;
-  min-width: max-content;
   border: 0;
   border-radius: 3px;
-  padding: 5px 8px;
+  padding: 5px 10px;
   font: inherit;
   font-size: 11px;
   font-weight: 600;

@@ -9,6 +9,7 @@
 import { useEffect, useRef } from 'preact/hooks'
 import uPlot, { type AlignedData, type Options } from 'uplot'
 import 'uplot/dist/uPlot.min.css'
+import { trendGran, type Range, type TrendGran } from '../db/queries.ts'
 
 export type UPlotChartProps = {
   /** data[0] = x 值（时间轴用 unix 秒，离散轴用序号），data[n] = 各 series 的 y */
@@ -253,14 +254,56 @@ export function UPlotChart({
   return <div ref={hostRef} style={{ width: '100%' }} />
 }
 
-// ---- 小工具：给日趋势对齐 x/y 数组 ----
+// ---- 小工具：给趋势图对齐 x/y 数组 ----
 
-/** 把 day 字符串数组 + 各 y 数组对齐为 uPlot AlignedData（x 为 unix 秒）。
- *  day 按 'YYYY-MM-DDT00:00:00' 解析为**本地**午夜，与日粒度查询的本地时区分组一致。 */
+/** 把桶 key → unix 秒（本地时区，与查询的本地分桶一致）。
+ *  支持五种桶 key：'YYYY-MM'（月初零点）、'YYYY-MM-DD'（当日午夜）、'YYYY-MM-DDTHH'（整点）、
+ *  'YYYY-MM-DDTHH:MM'（分钟）、'YYYY-MM-DDTHH:MM:SS'（30 秒桶）。 */
+export function bucketKeyToX(key: string): number {
+  const t =
+    key.length === 7 ? `${key}-01T00:00:00`
+    : key.length === 10 ? `${key}T00:00:00`
+    : key.length === 13 ? `${key}:00:00`
+    : key.length === 16 ? `${key}:00`
+    : key
+  return Math.floor(Date.parse(t) / 1000)
+}
+
+/** 把桶 key 字符串数组 + 各 y 数组对齐为 uPlot AlignedData（x 为 unix 秒）。 */
 export function toTimeAlignedData(
   days: readonly string[],
   ys: readonly (readonly (number | null)[])[],
 ): AlignedData {
-  const x = days.map((d) => Math.floor(Date.parse(`${d}T00:00:00`) / 1000))
+  const x = days.map(bucketKeyToX)
   return [x, ...ys.map((arr) => Array.from(arr))]
+}
+
+/** 按当前范围的趋势桶粒度（trendGran，页面可用 granOverride 指定所选档位）生成 x 轴标签格式：
+ *  月桶 → 26/9；日/周桶 → 26/9/3（周桶显示周一）；小时桶 → 9/3\n14:00（两行）；分钟桶 → 14:05；秒桶 → 14:05:30。 */
+export function trendXFormat(range: Range, granOverride?: TrendGran): (v: number) => string {
+  const gran = granOverride ?? trendGran(range)
+  if (gran === 'hour') {
+    return (v: number) => {
+      const d = new Date(v * 1000)
+      return `${d.getMonth() + 1}/${d.getDate()}\n${String(d.getHours()).padStart(2, '0')}:00`
+    }
+  }
+  if (gran === 'minute' || gran === 'second') {
+    return (v: number) => {
+      const d = new Date(v * 1000)
+      const p = (n: number) => String(n).padStart(2, '0')
+      const base = `${p(d.getHours())}:${p(d.getMinutes())}`
+      return gran === 'second' ? `${base}:${p(d.getSeconds())}` : base
+    }
+  }
+  if (gran === 'month') {
+    return (v: number) => {
+      const d = new Date(v * 1000)
+      return `${d.getFullYear() % 100}/${d.getMonth() + 1}`
+    }
+  }
+  return (v: number) => {
+    const d = new Date(v * 1000)
+    return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
+  }
 }

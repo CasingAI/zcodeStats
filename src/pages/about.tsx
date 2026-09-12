@@ -27,7 +27,7 @@ export function AboutPage() {
         <ol style={{ margin: '8px 0 0 20px', padding: 0, fontSize: 13, lineHeight: 1.7 }}>
           <li>在 ZCode 中正常使用一段时间,让 <code>~/.zcode/cli/db/db.sqlite</code> 里积累数据。</li>
           <li>点右上角「打开 db.sqlite」,或直接把文件拖进浏览器窗口。</li>
-          <li>在左侧导航切换「总览 / 按模型 / 按日趋势 / 按会话 / 按小时 / 按工具 / 错误与重试 / SQL 控制台」查看不同维度的统计。</li>
+          <li>在左侧导航切换「总览 / 按模型 / 趋势 / 按会话 / 按小时 / 按工具 / 错误与重试 / SQL 控制台」查看不同维度的统计。</li>
           <li>需要原始数据时,可在 SQL 控制台里直接写查询。</li>
         </ol>
       </div>

@@ -107,7 +107,9 @@ export type ByProviderModelRow = TimingAggregates & {
   cost: number
 }
 
-export type ByDayRow = TimingAggregates & {
+/** 趋势页的「本地时间桶」行；`day` 是分桶 key，粒度随范围/选择器可为
+ *  日/周（本周周一）/月（'YYYY-MM'）/小时/5 分钟/30 秒 */
+export type TrendRow = TimingAggregates & {
   day: string
   calls: number
   totalTokens: number
@@ -122,7 +124,7 @@ export type ByDayRow = TimingAggregates & {
   cost: number
 }
 
-export type ByDayByModelRow = TimingAggregates & {
+export type TrendByModelRow = TimingAggregates & {
   day: string
   modelId: string
   inputTokens: number
@@ -288,4 +290,44 @@ export type SqlExecResult = {
   rowsAffected: number
   lastInsertRowid: number | null
   durationMs: number
+}
+
+// ---- 思考页（worker op: thinking）----
+
+/** 思考聚合的请求参数：本地毫秒时间戳区间 [from, to) */
+export type ThinkingArgs = { from: number; to: number }
+
+/** thinking op 的过程消息：
+ *  scan = 正在扫描会话记录（found = 已找到的思考段数）；
+ *  tokenizer = 正在加载 GLM 分词器；
+ *  aggregates = 聚合快照先行下发（页面立即按估算渲染），行内 countedTokens 均为 0；
+ *  count = GLM 思考原文的精确计数进度 */
+export type ThinkingProgress =
+  | { phase: 'scan'; found: number }
+  | { phase: 'tokenizer' }
+  | { phase: 'aggregates'; rows: ThinkingRow[] }
+  | { phase: 'count'; counted: number; total: number }
+
+/** 思考页的「本地小时桶 × model_id」行。
+ *  token 双口径：reportedTokens = model_usage.reasoning_tokens 之和（接口报数的
+ *  模型，如 deepseek/kimi）；countedTokens = 对 part 表思考原文用 GLM 官方分词器
+ *  计数的结果（仅 GLM 系）。chars 仅 GLM 系行有值（精确计数完成前的估算兜底）。
+ *  thinkMs 只累加起止时间齐全的思考段（part.time.start/end）。 */
+export type ThinkingRow = {
+  /** 本地时区小时桶，格式 'YYYY-MM-DDTHH' */
+  bucket: string
+  modelId: string
+  /** 思考段数（part 表 type='reasoning' 的行数） */
+  parts: number
+  thinkMs: number
+  chars: number
+  countedTokens: number
+  reportedTokens: number
+}
+
+export type ThinkingResult = {
+  rows: ThinkingRow[]
+  /** false = 计数被中止（如用户切走了范围），GLM 的 countedTokens 不完整，
+   *  页面应继续按 chars 估算展示 */
+  exact: boolean
 }

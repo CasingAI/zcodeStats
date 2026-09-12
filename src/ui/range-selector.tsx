@@ -5,13 +5,14 @@
 // 而不是嵌在 tab 容器内部被压窄。
 //
 // 行为：
-//   - 4 个 tab：近 7 天 / 近 30 天 / 全部 / 自定义
-//   - 选前 3 个时通过 onPreset(p) 回调，外部把 range 写成 { kind:'preset', preset }
+//   - 5 个 tab：近 30 分钟 / 近 7 天 / 近 30 天 / 全部 / 自定义
+//   - 选前 4 个时通过 onPreset(p) 回调，外部把 range 写成 { kind:'preset', preset }
 //   - 选"自定义"时切换到 custom tab，此时 RangeSelectorCustomPanel 显示
-//     两个 <DatePicker>（从 / 到） + 应用/重置 按钮
+//     两个 <DatePicker>（从 / 到，日期+时间到分钟） + 应用/重置 按钮
 //   - 内部用本地 activeTab state 跟踪用户当前停在哪个 tab；
 //     value 改变时（外部或跨 tab 同步）activeTab 自动跟随。
 //   - 共享同一份 draftFrom / draftTo state，封装在 useRangeSelectorDraft hook 里。
+//     draft 为精确时刻（ms），「应用」原样提交（to 为开区间端点）。
 
 import { useEffect, useState } from 'preact/hooks'
 import { SegmentedControl } from './segmented-control.tsx'
@@ -20,18 +21,22 @@ import { DatePicker } from './date-picker.tsx'
 import type { Range, RangePreset } from '../db/queries.ts'
 import './range-selector.css'
 
-const MS_PER_DAY = 86_400_000
+const MS_PER_HOUR = 3600 * 1000
 
-function startOfDayMs(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime()
-}
-
-function toIsoDate(ms: number): string {
+/** "MM-DD HH:mm"（customRangeLabel 用，年份通常无歧义故省略） */
+function toLabelDateTime(ms: number): string {
   const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-type TabId = 'preset:7d' | 'preset:30d' | 'preset:all' | 'custom'
+/** 当天 23:59:59.999（「到」的上限，允许选满今天） */
+function endOfTodayMs(): number {
+  const d = new Date()
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime()
+}
+
+type TabId = 'preset:30m' | 'preset:7d' | 'preset:30d' | 'preset:all' | 'custom'
 
 function currentTab(r: Range): TabId {
   if (r.kind === 'custom') return 'custom'
@@ -40,37 +45,42 @@ function currentTab(r: Range): TabId {
 
 /**
  * 共享的 draft 状态：tab 和 custom 面板都基于这份草稿渲染。
- * - 首次进入"自定义"tab：草稿从"近 30 天"起算
+ * - 首次进入"自定义"tab：草稿为「现在 - 30 天 → 现在」
  * - 外部 value 是 custom：草稿跟随 value
  * - 点"应用"才提交，期间修改不污染父 range
  */
 export type RangeSelectorDraft = {
-  todayMs: number
+  nowMs: number
   draftFrom: number
   draftTo: number
   setDraftFrom: (ms: number) => void
   setDraftTo: (ms: number) => void
 }
 
+function defaultDraft(): { from: number; to: number } {
+  const now = Date.now()
+  return { from: now - 30 * 24 * MS_PER_HOUR, to: now }
+}
+
 export function useRangeSelectorDraft(value: Range): RangeSelectorDraft {
-  const todayMs = startOfDayMs(new Date())
+  const [nowMs] = useState<number>(() => Date.now())
   const [draftFrom, setDraftFrom] = useState<number>(() => {
     if (value.kind === 'custom') return value.from
-    return todayMs - 29 * MS_PER_DAY
+    return defaultDraft().from
   })
   const [draftTo, setDraftTo] = useState<number>(() => {
-    if (value.kind === 'custom') return value.to - MS_PER_DAY
-    return todayMs
+    if (value.kind === 'custom') return value.to
+    return defaultDraft().to
   })
 
   useEffect(() => {
     if (value.kind === 'custom') {
       setDraftFrom(value.from)
-      setDraftTo(value.to - MS_PER_DAY)
+      setDraftTo(value.to)
     }
   }, [value])
 
-  return { todayMs, draftFrom, draftTo, setDraftFrom, setDraftTo }
+  return { nowMs, draftFrom, draftTo, setDraftFrom, setDraftTo }
 }
 
 export type RangeSelectorCustomPanelProps = {
@@ -90,10 +100,10 @@ export function RangeSelectorCustomPanel({
 }: RangeSelectorCustomPanelProps) {
   if (!visible) return null
 
-  const { todayMs, draftFrom, draftTo, setDraftFrom, setDraftTo } = draft
+  const { draftFrom, draftTo, setDraftFrom, setDraftTo } = draft
 
   const apply = () => {
-    onCustom(draftFrom, draftTo + MS_PER_DAY)
+    onCustom(draftFrom, draftTo)
   }
 
   return (
@@ -111,7 +121,8 @@ export function RangeSelectorCustomPanel({
         value={draftTo}
         onChange={setDraftTo}
         minMs={draftFrom}
-        maxMs={todayMs}
+        maxMs={endOfTodayMs()}
+        quick="now"
       />
       <IosButton tone="primary" size="compact" onClick={apply} disabled={draftFrom >= draftTo}>
         应用
@@ -158,15 +169,16 @@ export function useRangeSelectorState(props: {
   }, [value])
 
   const reset = () => {
-    draft.setDraftFrom(draft.todayMs - 29 * MS_PER_DAY)
-    draft.setDraftTo(draft.todayMs)
+    const d = defaultDraft()
+    draft.setDraftFrom(d.from)
+    draft.setDraftTo(d.to)
     onPreset('30d')
   }
 
   const showCustom = activeTab === 'custom'
   const customRangeLabel =
     value.kind === 'custom'
-      ? `${toIsoDate(value.from)} → ${toIsoDate(value.to - MS_PER_DAY)}`
+      ? `${toLabelDateTime(value.from)} → ${toLabelDateTime(value.to)}`
       : null
 
   return { value, onPreset, onCustom, draft, activeTab, setActiveTab, showCustom, customRangeLabel, reset }
@@ -188,8 +200,9 @@ export function RangeSelectorTabs({ state, ariaLabel, className }: RangeSelector
     setActiveTab(id)
     if (id === 'custom') {
       if (value.kind !== 'custom') {
-        draft.setDraftFrom(draft.todayMs - 29 * MS_PER_DAY)
-        draft.setDraftTo(draft.todayMs)
+        const d = defaultDraft()
+        draft.setDraftFrom(d.from)
+        draft.setDraftTo(d.to)
       }
       return
     }
@@ -204,6 +217,7 @@ export function RangeSelectorTabs({ state, ariaLabel, className }: RangeSelector
         onChange={handleTab}
         ariaLabel={ariaLabel ?? '时间范围'}
         items={[
+          { id: 'preset:30m', label: '近30分钟' },
           { id: 'preset:7d', label: '近7天' },
           { id: 'preset:30d', label: '近30天' },
           { id: 'preset:all', label: '全部' },

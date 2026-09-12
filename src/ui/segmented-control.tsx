@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import './segmented-control.css'
 
@@ -29,6 +29,9 @@ export function SegmentedControl<T extends string>({
   className,
 }: SegmentedControlProps<T>) {
   const [motionReady, setMotionReady] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  // thumb 按激活项实测几何（段宽随文字自然变化，不等分），null 时走 CSS 等分兜底
+  const [thumb, setThumb] = useState<{ w: number; x: number } | null>(null)
   const activeIndex = Math.max(
     0,
     items.findIndex((item) => item.id === value),
@@ -38,6 +41,22 @@ export function SegmentedControl<T extends string>({
     const frame = requestAnimationFrame(() => setMotionReady(true))
     return () => cancelAnimationFrame(frame)
   }, [])
+
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const measure = () => {
+      const el = root.querySelectorAll<HTMLButtonElement>('.segmented-control__item')[activeIndex]
+      if (!el) return
+      const w = el.offsetWidth
+      const x = el.offsetLeft - root.clientLeft
+      setThumb((prev) => (prev && prev.w === w && prev.x === x ? prev : { w, x }))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(root)
+    return () => ro.disconnect()
+  }, [activeIndex, items])
 
   const rootClass = [
     'segmented-control',
@@ -49,6 +68,7 @@ export function SegmentedControl<T extends string>({
 
   return (
     <div
+      ref={rootRef}
       class={rootClass}
       role="tablist"
       aria-label={ariaLabel}
@@ -57,7 +77,11 @@ export function SegmentedControl<T extends string>({
         '--segmented-index': String(activeIndex),
       }}
     >
-      <span class="segmented-control__thumb" aria-hidden="true" />
+      <span
+        class="segmented-control__thumb"
+        aria-hidden="true"
+        style={thumb ? { width: `${thumb.w}px`, transform: `translateX(${thumb.x}px)` } : undefined}
+      />
       {items.map((item) => {
         const active = value === item.id
         const itemClass = [

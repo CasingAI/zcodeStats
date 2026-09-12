@@ -6,21 +6,22 @@ import uPlot from 'uplot'
 import { IosButton } from '../ui/ios-button.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
 import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
-import { UPlotChart, toTimeAlignedData } from '../ui/uplot-chart.tsx'
+import { UPlotChart, toTimeAlignedData, trendXFormat } from '../ui/uplot-chart.tsx'
 import { useQuery } from '../lib/use-query.ts'
 import { navigate } from '../lib/router.ts'
 import {
   QUERIES,
   rangeSignature,
-  shapeByDay,
-  shapeByDayByModel,
-  aggregateCostByDay,
+  shapeTrend,
+  shapeTrendByModel,
+  aggregateCostByBucket,
   shapeByHour,
   shapeByModel,
+  trendGran,
   type ParamQuery,
 } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
-import type { ByDayRow, ByModelRow } from '../db/types.ts'
+import type { TrendRow, ByModelRow } from '../db/types.ts'
 import {
   marksSignature,
   normalizeModelName,
@@ -70,7 +71,7 @@ type ModelDetailData = {
   speedSampleCount: number
   ttftSampleCount: number
   durationSampleCount: number
-  daily: ByDayRow[]
+  daily: TrendRow[]
   /** 0-23 时的 token 聚合（对 weekday 折叠） */
   hourTokens: number[]
   hourCalls: number[]
@@ -95,6 +96,11 @@ type ModelDetailData = {
 export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) {
   const { range, setPreset, setCustom } = useRange()
   const rs = useRangeSelectorState({ value: range, onPreset: setPreset, onCustom: setCustom })
+  // 短范围下趋势分桶细到小时/5 分钟/30 秒，标题跟随粒度
+  const trendWord =
+    trendGran(range) === 'day' ? '日'
+    : trendGran(range) === 'hour' ? '小时'
+    : trendGran(range) === 'minute' ? '5分钟' : '30秒'
   const marks = useMarks()
   const custom = useCustomModels()
 
@@ -179,19 +185,19 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
       const cacheHitRate =
         inputTokens + cacheCreation > 0 ? cacheRead / (inputTokens + cacheCreation) : 0
 
-      const dayQ: ParamQuery = QUERIES.byDay(range, ids)
-      const dbyMQ: ParamQuery = QUERIES.byDayByModel(range)
+      const dayQ: ParamQuery = QUERIES.trend(range, ids)
+      const dbyMQ: ParamQuery = QUERIES.trendByModel(range)
       const [dayR, dbyMR, hourR] = await Promise.all([
         d.select(dayQ.sql, dayQ.bind),
         d.select(dbyMQ.sql, dbyMQ.bind),
         d.select(QUERIES.byHour(range, ids).sql, QUERIES.byHour(range, ids).bind),
       ])
-      // byDayByModel 是全量；按 ids 过滤后再折叠到 day → cost
-      const dbyMRows = shapeByDayByModel(dbyMR).filter(
+      // trendByModel 是全量；按 ids 过滤后再折叠到 day → cost
+      const dbyMRows = shapeTrendByModel(dbyMR).filter(
         (r) => r.modelId !== '' && ids.includes(r.modelId),
       )
-      const costMap = aggregateCostByDay(dbyMRows)
-      const daily = shapeByDay(dayR, costMap)
+      const costMap = aggregateCostByBucket(dbyMRows)
+      const daily = shapeTrend(dayR, costMap)
       const grid = shapeByHour(hourR)
 
       // weekday×hour 折叠成 0-23
@@ -341,7 +347,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
           </div>
 
           <div class="section">
-            <h2 class="section__title">日趋势</h2>
+            <h2 class="section__title">{trendWord}趋势</h2>
             {state.data.daily.length === 0 ? (
               <div class="app-banner">所选时间窗内无数据</div>
             ) : (
@@ -354,16 +360,13 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
                 height={240}
                 seriesDefs={dailySeriesDefs}
                 yFormat={(v) => (Math.abs(v) >= 1000 ? formatCount(v) : String(Math.round(v)))}
-                xFormat={(v) => {
-                  const d = new Date(v * 1000)
-                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
-                }}
+                xFormat={trendXFormat(range)}
               />
             )}
           </div>
 
           <div class="section">
-            <h2 class="section__title">输出速度日趋势</h2>
+            <h2 class="section__title">输出速度{trendWord}趋势</h2>
             {state.data.daily.length === 0 ? (
               <div class="app-banner">所选时间窗内无数据</div>
             ) : (
@@ -375,16 +378,13 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
                 height={220}
                 seriesDefs={dailySpeedSeriesDefs}
                 yFormat={(v) => formatTokensPerSecond(v)}
-                xFormat={(v) => {
-                  const d = new Date(v * 1000)
-                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
-                }}
+                xFormat={trendXFormat(range)}
               />
             )}
           </div>
 
           <div class="section">
-            <h2 class="section__title">TTFT 日趋势</h2>
+            <h2 class="section__title">TTFT {trendWord}趋势</h2>
             {state.data.daily.length === 0 ? (
               <div class="app-banner">所选时间窗内无数据</div>
             ) : (
@@ -396,10 +396,7 @@ export function ModelDetailPage({ db, group }: { db: OpenedDb; group: string }) 
                 height={220}
                 seriesDefs={dailyTtftSeriesDefs}
                 yFormat={(v) => formatDuration(v)}
-                xFormat={(v) => {
-                  const d = new Date(v * 1000)
-                  return `${d.getFullYear() % 100}/${d.getMonth() + 1}/${d.getDate()}`
-                }}
+                xFormat={trendXFormat(range)}
               />
             )}
           </div>
