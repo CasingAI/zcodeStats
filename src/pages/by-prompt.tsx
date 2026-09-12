@@ -306,7 +306,7 @@ function KpiGrid(props: { kpis?: PromptKpis | null; loading?: boolean }) {
         tone="purple"
         loading={loading}
         value={kpis ? formatCount(kpis.avgTokens, 2) : ''}
-        sub="含输入 / 输出 / reasoning / 缓存"
+        sub="含输入 / 输出 / reasoning（缓存读已含在输入内，不重复计）"
       />
       <KpiCard
         label="平均每次 Prompt 调用"

@@ -403,8 +403,8 @@ function buildModelSeries(
     bucket.ttftSumMs += r.ttftSumMs
     bucket.ttftSampleCount += r.ttftSampleCount
     bucket.totalDurationMs += r.totalDurationMs
-    const tokens =
-      r.inputTokens + r.outputTokens + r.reasoningTokens + r.cacheReadTokens + r.cacheCreationTokens
+    // inputTokens 已含 cacheReadTokens，不再叠加，避免缓存读重复计数
+    const tokens = r.inputTokens + r.outputTokens + r.reasoningTokens + r.cacheCreationTokens
     bucket.tokens += tokens
     const cost = costFor(r.modelId, {
       inputTokens: r.inputTokens,

@@ -6,8 +6,8 @@
 //   model_usage.status in ('running','completed','error','cancelled')
 //   model_usage.input_tokens, output_tokens, reasoning_tokens,
 //     cache_creation_input_tokens, cache_read_input_tokens: INTEGER NOT NULL
-//   model_usage.computed_total_tokens: precomputed = input + output + cache_*
-//     + reasoning; we use it for "use total"
+//   model_usage.computed_total_tokens: precomputed = input + output（input 已含
+//     缓存读，见 raw_usage_json）；我们用它作 "用量总数"，成本估算另行扣减，见 pricing.ts
 //   turn_usage.turn_id: per turn
 //   tool_usage.tool_name, duration_ms, output_bytes, status
 
@@ -1306,33 +1306,23 @@ export function aggregateByPrompt(
 
   const details: ByPromptDetailRow[] = []
   for (const [turnId, slices] of byTurn) {
-    // 主模型：分项 token 总和最大的那个 model_id
+    // 主模型：分项 token 总和最大的那个 model_id。
+    // 注意 inputTokens 已包含 cacheReadTokens，比较时不能再叠加缓存读，否则重复计数。
     let primary = slices[0]
     if (!primary) continue
     for (const s of slices) {
       const sTokens =
-        s.inputTokens +
-        s.outputTokens +
-        s.reasoningTokens +
-        s.cacheReadTokens +
-        s.cacheCreationTokens
+        s.inputTokens + s.outputTokens + s.reasoningTokens + s.cacheCreationTokens
       const pTokens =
         primary.inputTokens +
         primary.outputTokens +
         primary.reasoningTokens +
-        primary.cacheReadTokens +
         primary.cacheCreationTokens
       if (sTokens > pTokens) primary = s
     }
 
     const totalTokens = slices.reduce(
-      (sum, s) =>
-        sum +
-        s.inputTokens +
-        s.outputTokens +
-        s.reasoningTokens +
-        s.cacheReadTokens +
-        s.cacheCreationTokens,
+      (sum, s) => sum + s.inputTokens + s.outputTokens + s.reasoningTokens + s.cacheCreationTokens,
       0,
     )
     const inputTokens = slices.reduce((sum, s) => sum + s.inputTokens, 0)

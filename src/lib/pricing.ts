@@ -5,7 +5,8 @@
 //   ZCode 套餐内部吸收；这里给最坏估计）
 //   reasoning 并入"输出价"（因为推理 token 跟输出 token 一样是模型生成）
 // 公式：
-//   成本 = (输入 + 缓存写) × 输入价 + (输出 + reasoning) × 输出价 + 缓存读 × 缓存价
+//   成本 = (输入 − 缓存读 + 缓存写) × 输入价 + (输出 + reasoning) × 输出价 + 缓存读 × 缓存价
+//   （输入列已含缓存读，须先减去，避免缓存读按输入全价重复计费）
 //
 // 模型匹配链（按顺序）：
 //   1) 用户标记：model_id → 内置模型名 / 自定义模型名（直接命中）
@@ -375,7 +376,11 @@ export function costFor(
   dbKey: string = DEFAULT_KEY,
 ): number {
   const { price } = findInTable(modelId, dbKey)
-  const inB = (u.inputTokens + u.cacheCreationTokens) / 1_000_000
+  // input_tokens 已包含缓存读（raw_usage_json 里 total = input + output，cacheRead ⊆ input），
+  // 输入桶要先减掉缓存读，否则缓存读会被按输入全价 + 缓存价重复计费。
+  const inB =
+    (Math.max(u.inputTokens - u.cacheReadTokens, 0) + u.cacheCreationTokens) /
+    1_000_000
   const outB = (u.outputTokens + u.reasoningTokens) / 1_000_000
   const cacheB = u.cacheReadTokens / 1_000_000
   return inB * price.input + outB * price.output + cacheB * price.cacheInput
@@ -388,7 +393,9 @@ export function costForWithMatch(
   dbKey: string = DEFAULT_KEY,
 ): { cost: number; matched: string } {
   const { price, matched } = findInTable(modelId, dbKey)
-  const inB = (u.inputTokens + u.cacheCreationTokens) / 1_000_000
+  const inB =
+    (Math.max(u.inputTokens - u.cacheReadTokens, 0) + u.cacheCreationTokens) /
+    1_000_000
   const outB = (u.outputTokens + u.reasoningTokens) / 1_000_000
   const cacheB = u.cacheReadTokens / 1_000_000
   return {
