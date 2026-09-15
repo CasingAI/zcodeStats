@@ -13,8 +13,8 @@
    - **"打开 db.sqlite"** — 系统文件选择器。会先弹窗告诉你 db 文件的确切位置（macOS / Windows）以及"建议直接拖进来"。macOS 系统选择器默认不显示隐藏目录，按 ⌘Shift+. 切到显示隐藏文件。
 4. 左侧页面切换：总览 / 按模型 / 趋势 / 按会话 / 按小时 / 按工具 / 错误与重试 / SQL 控制台。
 5. **时间范围**：总览 / 趋势 / 按会话 / 按小时 都支持「近7天 / 近30天 / 全部」。
-6. **模型标记**（持久化，全局生效）：按模型页可切「按ID / 按名字聚合」（按名字会去掉 `openrouter/` 这类 provider 前缀），「标记模型」弹窗里给任意 model_id 选一个目标模型（内置 32 个或自建），相同目标会被合并成一组并按目标价计算成本。标记存浏览器 localStorage，**改了任何页面的标记，所有页面的聚合 + 大致成本立即重算**。点击任意分组行进入**模型详情**（KPI + 日趋势 + 小时分布 + 大致成本）。自定义模型在弹窗底部填写单价（¥/1M token）并可删除。
-7. **大致成本**：内置 32 个模型 ¥/M token 的价目表（输入 / 输出 / 缓存输入），公式 = `(输入 + 缓存写) × 输入价 + (输出 + reasoning) × 输出价 + 缓存读 × 缓存价`。模型名匹配链：标记 → 精确 → 归一化（去 provider 前缀、小写）→ 内置别名（`stealth/ox-alpha` → `GLM-5.3-Flash`）→ **默认按 deepseek-v4-pro**。表里没列的模型都会按 deepseek-v4-pro 算，**这是估值，不是真实账单**。
+6. **模型标记**（持久化，全局生效）：按模型页可切「按ID / 按名字聚合」（按名字会去掉 `openrouter/` 这类 provider 前缀），「标记模型」弹窗里给任意 model_id 选一个目标模型（内置 37 个或自建），相同目标会被合并成一组并按目标价计算成本。标记存浏览器 localStorage，**改了任何页面的标记，所有页面的聚合 + 大致成本立即重算**。点击任意分组行进入**模型详情**（KPI + 日趋势 + 小时分布 + 大致成本）。自定义模型在弹窗底部填写单价（¥/1M token）并可删除。
+7. **大致成本**：内置 37 个模型 ¥/M token 的价目表（输入 / 输出 / 缓存输入），公式 = `(输入 + 缓存写) × 输入价 + (输出 + reasoning) × 输出价 + 缓存读 × 缓存价`。模型名匹配链：标记 → 精确 → 归一化（去 provider 前缀、小写）→ 内置别名（`stealth/ox-alpha` → `GLM-5.3-Flash`）→ **默认按 deepseek-v4-pro**。表里没列的模型都会按 deepseek-v4-pro 算，**这是估值，不是真实账单**。
 8. **趋势**页有粒度切换（小时 / 日 / 周 / 月；近30分钟 / 近7天 / 自定义 ≤7 天范围另有 30秒 / 5分钟档，与时间范围联动）与指标切换：Token 模式（总 token / 缓存读 / 输出三条线）或成本模式（单条 ¥ 折线 + 区间/均值/峰值三张 KPI 卡，文案随粒度变化）。
 9. 趋势图为 [uPlot](https://github.com/leeoniya/uPlot)：悬浮查值、图例点击隐藏系列、拖拽框选缩放、双击复位。
 
@@ -91,14 +91,14 @@ src/
     ├── router.ts         # hash 路由（支持 /model/<param>）
     ├── use-query.ts      # 通用数据拉取 hook
     ├── model-groups.ts   # 标记 + 自定义模型存储 + 订阅 hook + resolveGroups + applyBuiltin
-    └── pricing.ts        # 32 模型价目表 + 成本估算（按 dbKey 隔离缓存）
+    └── pricing.ts        # 37 模型价目表 + 成本估算（按 dbKey 隔离缓存）
 ```
 
 ## 数据口径与限制
 
 - **byModel LIMIT 5000**：覆盖绝大多数用户。超出会显示"已截断"角标 — 切到 7d/30d 通常就能看完。
 - **range 控件一致性**：所有"按 X"页 + 总览页 + 工具调用 KPI 都响应 7d/30d/all；只有 SQL 控制台不受影响（用户自写 SQL）。
-- **成本是估值，不是真实账单**：内置 32 模型价目表，未列出默认按 deepseek-v4-pro 算；缓存写按"输入价"计、reasoning 并入"输出价"。改标记 / 切 range 会重算。
+- **成本是估值，不是真实账单**：内置 37 模型价目表，未列出默认按 deepseek-v4-pro 算；缓存写按"输入价"计、reasoning 并入"输出价"。改标记 / 切 range 会重算。
 - **价格缓存按 dbKey 隔离**：close + open 不同 db 不会拿旧价（`pricing.clearPriceCache('*')` 全清）。
 - **标记全局生效**：`zcode-stats.model-marks` + `zcode-stats.custom-models` 改一次，所有 useMarks() 订阅的页面 + 价格缓存（pricing 内部 clearPriceCache('*')）同步重算。跨 tab 同步通过 `storage` 事件。
 - **内置等价映射**（`pricing.ts` BUILTIN_ALIASES_LC）：如 `openrouter/sonoma/stealth/ox-alpha` → `GLM-5.3-Flash`，大小写不敏感。后续遇到更多直接往表里加。

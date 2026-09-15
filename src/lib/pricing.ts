@@ -54,6 +54,9 @@ const TABLE: Record<string, ModelPrice> = {
   'gpt-5.4': { input: 18.0, output: 108.0, cacheInput: 1.8 },
   'gpt-5.4-mini': { input: 5.4, output: 32.4, cacheInput: 0.54 },
   'gpt-5.4-nano': { input: 1.44, output: 9.0, cacheInput: 0.14 },
+  // GPT-5.3 Codex Spark（ZCode 客户端内置美元价 $1.75 / $14 / 缓存 $0.175，按 ×7.2 折人民币，
+  // 与 gpt-5 / gpt-5.4 / gpt-4o 等条目同一汇率口径）
+  'gpt-5.3-codex-spark': { input: 12.6, output: 100.8, cacheInput: 1.26 },
   'gpt-5': { input: 9.0, output: 72.0, cacheInput: 0.9 },
   'gpt-5-mini': { input: 1.8, output: 14.4, cacheInput: 0.18 },
   'gpt-5-nano': { input: 0.36, output: 2.88, cacheInput: 0.04 },
@@ -64,6 +67,10 @@ const TABLE: Record<string, ModelPrice> = {
   'claude-sonnet-4.6': { input: 21.6, output: 108.0, cacheInput: 2.16 },
   'claude-haiku-4.5': { input: 7.2, output: 36.0, cacheInput: 0.72 },
   'composer-2.5': { input: 3.6, output: 18.0, cacheInput: 0.36 },
+  // Muse Spark 1.3 Contributor（Meta 公定价换算：输入 $0.1/M → ¥0.72/M，输出 $0.2/M →
+  // ¥1.44/M，缓存读 $0.002/M → ¥0.0144/M，同 gpt-5.3-codex-spark ×7.2 口径；
+  // 注意 contributor 是白名单专供价，比标准版 muse-spark-1.3 便宜一个量级）
+  'muse-spark-1.3-contributor': { input: 0.72, output: 1.44, cacheInput: 0.0144 },
 }
 
 /**
@@ -152,6 +159,7 @@ const DISPLAY_NAMES: Record<string, string> = {
   'gpt-5.4': 'GPT-5.4',
   'gpt-5.4-mini': 'GPT-5.4 Mini',
   'gpt-5.4-nano': 'GPT-5.4 Nano',
+  'gpt-5.3-codex-spark': 'GPT-5.3 Codex Spark',
   'gpt-5': 'GPT-5',
   'gpt-5-mini': 'GPT-5 Mini',
   'gpt-5-nano': 'GPT-5 Nano',
@@ -162,6 +170,7 @@ const DISPLAY_NAMES: Record<string, string> = {
   'claude-sonnet-4.6': 'Claude Sonnet 4.6',
   'claude-haiku-4.5': 'Claude Haiku 4.5',
   'composer-2.5': 'Composer 2.5',
+  'muse-spark-1.3-contributor': 'Muse Spark 1.3 Contributor',
 }
 
 function fallbackDisplayName(key: string): string {
@@ -327,7 +336,7 @@ export function clearPriceCache(dbKey?: string): void {
  * 这个 model_id 在价目表（含标记 + 自定义）里能不能被"识别"。
  *
  * 不读 cache — 每次调用直接查表 + 走内置别名表。频次受 by-model LIMIT 5000 上限约束，
- * 内部小循环 32 + 自定义数，足够便宜。
+ * 内部小循环 30+ + 自定义数，足够便宜。
  */
 export function isRecognizedModel(modelId: string): boolean {
   if (!modelId) return false
