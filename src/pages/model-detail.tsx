@@ -758,7 +758,9 @@ function PriceFormulaSection({
       }
     }
     for (const b of out.values()) {
-      const inB = (b.inTok + b.cacheWTok) / 1_000_000
+      // inTok 是原始 input_tokens（已含缓存读），输入桶要先减掉缓存读再加缓存写，
+      // 与 pricing.costFor 保持同一口径，否则缓存读会被按输入全价 + 缓存价重复计费
+      const inB = (Math.max(b.inTok - b.cacheRTok, 0) + b.cacheWTok) / 1_000_000
       const outB = (b.outTok + b.reasonTok) / 1_000_000
       const cacheB = b.cacheRTok / 1_000_000
       b.cost = inB * b.price.input + outB * b.price.output + cacheB * b.price.cacheInput
@@ -792,13 +794,17 @@ function PriceFormulaSection({
           缓存写按"输入价"计，reasoning 并入"输出价"）：
         </div>
         <div class="mono">
-          ¥ = (输入 + 缓存写) × 输入价 + (输出 + reasoning) × 输出价 + 缓存读 × 缓存价
+          ¥ = (输入 − 缓存读 + 缓存写) × 输入价 + (输出 + reasoning) × 输出价 + 缓存读 × 缓存价
+        </div>
+        <div style={{ marginTop: 2, color: '#8a8a90' }}>
+          （原始 input_tokens 已含缓存读，输入桶须减去，否则缓存读按输入全价重复计费）
         </div>
       </div>
 
       <div style={{ marginTop: 12 }}>
         {buckets.map((b) => {
           const isDefault = b.rule === 'default'
+          const uncachedIn = Math.max(b.inTok - b.cacheRTok, 0)
           return (
             <div
               key={`${b.matched}\u0000${b.rule}`}
@@ -840,7 +846,7 @@ function PriceFormulaSection({
                   color: isDefault ? '#7a2a2a' : '#1c1c1e',
                 }}
               >
-                ({fmtTok(b.inTok)} + {fmtTok(b.cacheWTok)}) × ¥{b.price.input.toFixed(2)}
+                ({fmtTok(uncachedIn)} + {fmtTok(b.cacheWTok)}) × ¥{b.price.input.toFixed(2)}
                 {' + '}
                 ({fmtTok(b.outTok)} + {fmtTok(b.reasonTok)}) × ¥{b.price.output.toFixed(2)}
                 {' + '}
@@ -852,9 +858,9 @@ function PriceFormulaSection({
                 下面给"输入档"一档手算示例（token 单位自动匹配 token 数量级）：
                 {' '}
                 <span class="mono">
-                  {fmtTokWithUnit(b.inTok + b.cacheWTok)} × {pricePerYi(b.price.input)}
+                  {fmtTokWithUnit(uncachedIn + b.cacheWTok)} × {pricePerYi(b.price.input)}
                   {' = '}
-                  ¥{((b.inTok + b.cacheWTok) / 1_000_000 * b.price.input).toFixed(2)}
+                  ¥{((uncachedIn + b.cacheWTok) / 1_000_000 * b.price.input).toFixed(2)}
                 </span>
               </div>
             </div>

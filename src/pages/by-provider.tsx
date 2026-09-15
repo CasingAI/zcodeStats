@@ -104,11 +104,12 @@ const columns = [
     render: (r: ByProviderRow) => formatCount(r.totalTokens),
   },
   {
+    // input_tokens 已含缓存读，按计费口径拆开：这里只显示未缓存的那部分
     key: 'input',
-    header: '输入',
+    header: '未缓存输入',
     align: 'right' as const,
-    width: '80px',
-    render: (r: ByProviderRow) => formatCount(r.inputTokens),
+    width: '100px',
+    render: (r: ByProviderRow) => formatCount(r.inputTokens - r.cacheReadTokens),
   },
   {
     key: 'cache_w',

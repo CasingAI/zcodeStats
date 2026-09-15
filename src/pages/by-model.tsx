@@ -74,7 +74,7 @@ export function ByModelPage({ db }: { db: OpenedDb }) {
             class="page__subtitle"
             style={{ fontSize: 11, color: '#8a8a90', marginTop: 2, minWidth: 0 }}
           >
-            "已标记"=用户手动指定计价模型；"已识别"=自动命中价目表；"未识别"=按 v4-pro 默认价估算成本，仅供量级参考。
+            "已标记"=用户手动指定计价模型；"已识别"=自动命中价目表；"未识别"=按 v4-pro 默认价估算成本，仅供量级参考。token 列按计费口径拆开：未缓存输入 = 总输入 − 缓存读，缓存读单独按缓存价计量；总 token = 总输入（含缓存读）+ 输出。
           </p>
         </div>
         <div
@@ -497,11 +497,12 @@ const columns = [
     render: (r: GroupedModelRow) => formatCount(r.totalTokens),
   },
   {
+    // input_tokens 已含缓存读，按计费口径拆开：这里只显示未缓存的那部分
     key: 'in',
-    header: '输入',
+    header: '未缓存输入',
     align: 'right' as const,
-    width: '80px',
-    render: (r: GroupedModelRow) => formatCount(r.inputTokens),
+    width: '100px',
+    render: (r: GroupedModelRow) => formatCount(r.inputTokens - r.cacheReadTokens),
   },
   {
     key: 'cache_w',

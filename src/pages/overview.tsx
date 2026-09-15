@@ -159,11 +159,16 @@ function KpiGrid(props: { data?: OverviewKpis; errorRate?: number; loading?: boo
 
 function BreakdownTable({ data, errorRate: _errorRate }: { data: OverviewKpis; errorRate: number }) {
   const rows: { label: string; value: string; sub?: string }[] = [
-    { label: '输入 token', value: formatFull(data.inputTokens), sub: formatCount(data.inputTokens) },
+    {
+      // input_tokens 已含缓存读，按计费口径拆开显示未缓存的部分
+      label: '未缓存输入',
+      value: formatFull(data.inputTokens - data.cacheReadTokens),
+      sub: `总输入 ${formatCount(data.inputTokens + data.cacheCreationTokens)}`,
+    },
     {
       label: '缓存读取',
       value: formatFull(data.cacheReadTokens),
-      sub: `占输入端 ${formatPct(
+      sub: `占总输入 ${formatPct(
         data.inputTokens + data.cacheCreationTokens > 0
           ? data.cacheReadTokens / (data.inputTokens + data.cacheCreationTokens)
           : 0,

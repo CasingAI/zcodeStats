@@ -90,10 +90,11 @@ const columns = [
     render: (r: BySessionRow) => formatCount(r.totalTokens),
   },
   {
+    // input_tokens 已含缓存读，按计费口径拆开：这里只显示未缓存的那部分
     key: 'in',
-    header: '输入',
+    header: '未缓存输入',
     align: 'right' as const,
-    render: (r: BySessionRow) => formatCount(r.inputTokens),
+    render: (r: BySessionRow) => formatCount(r.inputTokens - r.cacheReadTokens),
   },
   {
     key: 'cache',
