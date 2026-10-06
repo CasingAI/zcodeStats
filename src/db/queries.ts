@@ -104,6 +104,97 @@ export function trendBucketExpr(gran: TrendGran): string {
   return `strftime('%Y-%m-%dT%H:%M:%S', ${locSec} - (${locSec} % 30), 'unixepoch')`
 }
 
+/** 各粒度的桶宽（月桶按日历月，单列处理） */
+const GRAN_STEP_MS: Record<Exclude<TrendGran, 'month'>, number> = {
+  second: 30_000,
+  minute: 300_000,
+  hour: 3_600_000,
+  day: 86_400_000,
+  week: 604_800_000,
+}
+
+/** 单次桶轴枚举上限：细粒度只对 ≤7 天范围开放（7 天 30 秒 ≈ 2 万桶），
+ *  达到上限说明范围与粒度组合异常，返回 null 让调用方退回稀疏轴。 */
+const MAX_BUCKETS = 50_000
+
+// 下面三个函数都在「平移时间戳」上运算：t' = t - timezoneOffsetMs()，按 UTC 语义读即本地
+// 时间。trendBucketExpr 的 SQL 用的是同一个固定偏移（strftime 的 locSec），因此两侧逐字符
+// 等价；代价是实行夏令时的时区按当前偏移给历史数据分桶（与 SQL 口径一致，不额外引入偏差）。
+// 固定偏移也保证了「加一个桶宽再取整」必然前进，不存在回拨日原地打转的隐患。
+
+/** 平移时间戳 → 所属桶的起点（同样是平移语义） */
+function floorBucket(gran: TrendGran, shiftedMs: number): number {
+  const d = new Date(shiftedMs)
+  const y = d.getUTCFullYear()
+  const mo = d.getUTCMonth()
+  const day = d.getUTCDate()
+  const mk = (dd = day, hh = 0, mm = 0, ss = 0) => Date.UTC(y, mo, dd, hh, mm, ss)
+  if (gran === 'month') return mk(1)
+  if (gran === 'day') return mk()
+  // week：回退到本地周一（getUTCDay 周日=0 → +6 %7 得到距周一天数）
+  if (gran === 'week') return mk(day - ((d.getUTCDay() + 6) % 7))
+  if (gran === 'hour') return mk(day, d.getUTCHours())
+  if (gran === 'minute') return mk(day, d.getUTCHours(), Math.floor(d.getUTCMinutes() / 5) * 5)
+  return mk(day, d.getUTCHours(), d.getUTCMinutes(), Math.floor(d.getUTCSeconds() / 30) * 30)
+}
+
+/** 平移时间戳的下一个桶起点（月桶按日历月，其余按桶宽） */
+function nextBucket(gran: TrendGran, shiftedMs: number): number {
+  if (gran === 'month') {
+    const d = new Date(shiftedMs)
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)
+  }
+  return floorBucket(gran, shiftedMs + GRAN_STEP_MS[gran])
+}
+
+/** 桶起点 → 桶 key，逐字符等于 trendBucketExpr 的 strftime 输出。 */
+function bucketKeyOf(gran: TrendGran, shiftedMs: number): string {
+  const d = new Date(shiftedMs)
+  const p = (n: number) => String(n).padStart(2, '0')
+  const date = `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`
+  if (gran === 'month') return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}`
+  if (gran === 'day' || gran === 'week') return date
+  if (gran === 'hour') return `${date}T${p(d.getUTCHours())}`
+  if (gran === 'minute') return `${date}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`
+  return `${date}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+}
+
+/** epoch ms → 所属桶起点的 epoch ms（本地时区，与 trendBucketExpr 同一套分桶口径）。 */
+export function bucketStartMs(gran: TrendGran, ms: number): number {
+  const off = timezoneOffsetMs()
+  return floorBucket(gran, ms - off) + off
+}
+
+export type BucketAxis = {
+  /** 桶 key，与 SQL 结果里的 day 列同口径（按字符串对齐） */
+  keys: string[]
+  /** 桶起点，uPlot 时间轴的 unix 秒 */
+  xs: number[]
+}
+
+/**
+ * 按 gran 枚举 [fromMs, toMs] 覆盖到的全部桶（含首尾所在桶）。
+ *
+ * SQL 走的是 GROUP BY 分桶：没有调用的桶根本不会出现在结果里。若直接拿结果行
+ * 里的桶当 x 轴，相邻两点之间可能是几小时的空档（实测最长 9.75 小时），折线
+ * 会把这段无数据的时间画成一条近似直线。调用方用本函数铺出完整桶轴后，才能对
+ * 空桶显式填 0（token/成本）或 null（速度/TTFT，断线）。
+ *
+ * 桶数超过 MAX_BUCKETS 时返回 null（宁可不铺轴，也不要静默截断时间轴）。
+ */
+export function bucketAxis(gran: TrendGran, fromMs: number, toMs: number): BucketAxis | null {
+  const off = timezoneOffsetMs()
+  const keys: string[] = []
+  const xs: number[] = []
+  for (let t = floorBucket(gran, fromMs - off), i = 0; t + off <= toMs; i++) {
+    if (i >= MAX_BUCKETS) return null
+    keys.push(bucketKeyOf(gran, t))
+    xs.push(Math.floor((t + off) / 1000))
+    t = nextBucket(gran, t)
+  }
+  return { keys, xs }
+}
+
 /** 将 UTC epoch ms 偏移到本地时区 epoch ms 的毫秒数。
  *  用于 strftime('%H'/'%w') 取本地小时/星期。东八区 getTimezoneOffset=-480，返回 -28_800_000，
  *  SQL 中用 (started_at - offsetMs)/1000 即可得到本地时间。

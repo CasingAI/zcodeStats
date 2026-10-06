@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'preact/hooks'
-import { UPlotChart, toTimeAlignedData, trendXFormat } from '../ui/uplot-chart.tsx'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import type { AlignedData } from 'uplot'
+import { UPlotChart, bucketKeyToX, trendXFormat } from '../ui/uplot-chart.tsx'
 import { SegmentedControl } from '../ui/segmented-control.tsx'
 import { RangeSelectorTabs, RangeSelectorPanelForBelow, useRangeSelectorState } from '../ui/range-selector.tsx'
 import { KpiCard } from '../ui/kpi-card.tsx'
@@ -10,9 +11,12 @@ import {
   shapeTrend,
   shapeTrendByModel,
   aggregateCostByBucket,
+  bucketAxis,
   trendGran,
+  type BucketAxis,
   type TrendGran,
   type ParamQuery,
+  type Range,
 } from '../db/queries.ts'
 import type { OpenedDb } from '../db/client.ts'
 import type { TrendRow, TrendByModelRow } from '../db/types.ts'
@@ -108,10 +112,24 @@ export function TrendPage({ db }: { db: OpenedDb }) {
     },
   )
 
-  const modelSeries =
-    state.kind === 'ok' && dim === 'model'
-      ? buildModelSeries(state.data.byModel, state.data.rows.map((r) => r.day), metric, topN, marks)
-      : null
+  // 完整桶轴：SQL 只返回「有数据」的桶，直接拿结果里相邻两点连线，等于把中间几小时
+  // 无数据的时间画成一条近似直线。铺满所选范围的桶后，空桶才能显式归零/断线。
+  const axis = useMemo(
+    () => (state.kind === 'ok' ? trendAxis(range, gran, state.data.rows) : EMPTY_AXIS),
+    [state.kind === 'ok' ? state.data.rows : null, range, gran],
+  )
+  const rows = state.kind === 'ok' ? state.data.rows : null
+  const byModel = state.kind === 'ok' ? state.data.byModel : null
+
+  // 铺满轴后单个序列可达数万点，缓存住按交互维度计算的序列，避免无关渲染重算
+  const modelSeries = useMemo(
+    () => (byModel != null && dim === 'model' ? buildModelSeries(byModel, axis.keys, metric, topN, marks) : null),
+    [byModel, axis, dim, metric, topN, marks],
+  )
+  const totalData = useMemo(
+    () => (rows != null ? buildData(rows, metric, axis) : null),
+    [rows, axis, metric],
+  )
 
   // KPI 文案跟着所选粒度走
   const bucketCount = state.kind === 'ok' ? state.data.bucketCount : 0
@@ -208,23 +226,23 @@ export function TrendPage({ db }: { db: OpenedDb }) {
             {dim === 'model' && modelSeries ? (
               <UPlotChart
                 className="uplot-legend-top"
-                data={toTimeAlignedData(modelSeries.days, modelSeries.ys)}
+                data={axisData(axis, modelSeries.ys)}
                 time
                 height={300}
                 seriesDefs={modelSeries.defs}
                 yFormat={metricFormatter(metric)}
                 xFormat={trendXFormat(range, gran)}
               />
-            ) : (
+            ) : totalData ? (
               <UPlotChart
-                data={buildData(state.data.rows, metric)}
+                data={totalData}
                 time
                 height={280}
                 seriesDefs={totalSeries(metric, gran)}
                 yFormat={metricFormatter(metric)}
                 xFormat={trendXFormat(range, gran)}
               />
-            )}
+            ) : null}
           </>
         )}
       </div>
@@ -276,6 +294,8 @@ const speedSeries = [
     stroke: '#8e6cc7',
     width: 2,
     fill: 'rgba(142, 108, 199, 0.12)',
+    // 无样本的桶是 null：断线，别让折线跨过空档连成近似值
+    spanGaps: false,
     value: (_u: unknown, _raw: unknown, v: number | null) =>
       v == null || v === 0 ? '—' : formatTokensPerSecond(v),
   },
@@ -287,6 +307,7 @@ const ttftSeries = [
     stroke: '#34c759',
     width: 2,
     fill: 'rgba(52, 199, 89, 0.12)',
+    spanGaps: false,
     value: (_u: unknown, _raw: unknown, v: number | null) =>
       v == null || v === 0 ? '—' : formatDuration(v),
   },
@@ -306,33 +327,80 @@ function metricFormatter(metric: Metric) {
   return (v: number) => (Math.abs(v) >= 1000 ? formatCount(v) : String(Math.round(v)))
 }
 
-function buildData(rows: TrendRow[], metric: Metric) {
-  const days = rows.map((r) => r.day)
-  if (metric === 'cost') return toTimeAlignedData(days, [rows.map((r) => r.cost)])
-  // 无样本的桶保留 null（uPlot 断线），避免画成 0 造成"该桶速度/TTFT 为 0"的误读
-  if (metric === 'speed') {
-    return toTimeAlignedData(days, [rows.map((r) => r.avgOutputSpeed)])
+const EMPTY_AXIS: BucketAxis = { keys: [], xs: [] }
+
+/** 结果行自身的桶（稀疏轴）：铺轴失败时的兜底，等价于改动前的行为 */
+function sparseAxis(rows: readonly TrendRow[]): BucketAxis {
+  return {
+    keys: rows.map((r) => r.day),
+    xs: rows.map((r) => bucketKeyToX(r.day)),
   }
-  if (metric === 'ttft') {
-    return toTimeAlignedData(days, [rows.map((r) => r.avgTtftMs)])
-  }
-  return toTimeAlignedData(days, [
-    rows.map((r) => r.totalTokens),
-    rows.map((r) => r.cacheReadTokens),
-    rows.map((r) => r.outputTokens),
-  ])
+}
+
+/** 与 SQL 分桶同粒度的完整桶轴：[范围起, 范围止] 内的每个桶都在，
+ *  「全部」范围以数据首末桶为界（否则数据集越老、右侧零段越长）。
+ *  范围与粒度组合异常（桶数超上限）时退回稀疏轴。 */
+function trendAxis(range: Range, gran: Gran, rows: readonly TrendRow[]): BucketAxis {
+  const now = Date.now()
+  const DAY_MS = 86_400_000
+  const from =
+    range.kind === 'custom' ? range.from
+    : range.preset === '30m' ? now - 30 * 60_000
+    : range.preset === '7d' ? now - 7 * DAY_MS
+    : range.preset === '30d' ? now - 30 * DAY_MS
+    : null
+  if (from != null) return bucketAxis(gran, from, now) ?? sparseAxis(rows)
+  const first = rows[0]
+  const last = rows[rows.length - 1]
+  if (first == null || last == null) return EMPTY_AXIS
+  return bucketAxis(gran, bucketKeyToX(first.day) * 1000, bucketKeyToX(last.day) * 1000) ?? sparseAxis(rows)
+}
+
+/** 把稀疏的查询行按桶 key 铺到完整桶轴上；空桶填 empty（token/成本 0、速度/TTFT null）。 */
+function alignSeries(
+  axis: BucketAxis,
+  byKey: ReadonlyMap<string, TrendRow>,
+  pick: (r: TrendRow) => number | null,
+  empty: number | null,
+): (number | null)[] {
+  return axis.keys.map((k) => {
+    const r = byKey.get(k)
+    return r == null ? empty : pick(r)
+  })
+}
+
+/** 完整桶轴的 x + 各序列 → uPlot 数据（x 直接用轴上的桶起点，不再由 key 反解） */
+function axisData(axis: BucketAxis, ys: (number | null)[][]): AlignedData {
+  return [axis.xs, ...ys]
+}
+
+function buildData(rows: TrendRow[], metric: Metric, axis: BucketAxis): AlignedData {
+  const byKey = new Map(rows.map((r) => [r.day, r]))
+  // 成本：没有调用的桶就是 ¥0
+  if (metric === 'cost') return [axis.xs, alignSeries(axis, byKey, (r) => r.cost, 0)]
+  // 无样本的桶保留 null（配合 spanGaps:false 断线），画成 0 会被读成"该桶速度/TTFT 为 0"
+  if (metric === 'speed') return [axis.xs, alignSeries(axis, byKey, (r) => r.avgOutputSpeed, null)]
+  if (metric === 'ttft') return [axis.xs, alignSeries(axis, byKey, (r) => r.avgTtftMs, null)]
+  // token 三线：没有调用的桶就是 0 token，显式归零
+  return [
+    axis.xs,
+    alignSeries(axis, byKey, (r) => r.totalTokens, 0),
+    alignSeries(axis, byKey, (r) => r.cacheReadTokens, 0),
+    alignSeries(axis, byKey, (r) => r.outputTokens, 0),
+  ]
 }
 
 // ---- 按模型分线 ----
 
 type ModelSeries = {
-  days: string[]
   ys: (number | null)[][]
   defs: {
     label: string
     stroke: string
     width: number
     paths: unknown
+    /** 速度/TTFT 的空桶是 null：断线，不跨空档连线 */
+    spanGaps: boolean
     value: (_u: unknown, _raw: unknown, v: number | null) => string
   }[]
 }
@@ -379,19 +447,20 @@ function bucketValue(metric: Metric, b: TimingBucket): number | null {
  */
 function buildModelSeries(
   rows: readonly TrendByModelRow[],
-  days: readonly string[],
+  /** 完整桶轴上的桶 key（与轴的 x 同序），按 key 定位每行落在哪个点 */
+  keys: readonly string[],
   metric: Metric,
   topN: TopN,
   marks: MarkMap,
 ): ModelSeries {
-  const dayIdx = new Map<string, number>(days.map((d, i) => [d, i]))
+  const dayIdx = new Map<string, number>(keys.map((k, i) => [k, i]))
   // 组 key → 每日 bucket 序列（长度 = 天数）与区间总量
   const seriesMap = new Map<string, { ys: TimingBucket[]; total: number; tokenTotal: number }>()
   for (const r of rows) {
     const key = resolveGroupKey(r.modelId, 'name', marks)
     let entry = seriesMap.get(key)
     if (!entry) {
-      entry = { ys: Array.from({ length: days.length }, emptyTimingBucket), total: 0, tokenTotal: 0 }
+      entry = { ys: Array.from({ length: keys.length }, emptyTimingBucket), total: 0, tokenTotal: 0 }
       seriesMap.set(key, entry)
     }
     const di = dayIdx.get(r.day)
@@ -439,6 +508,7 @@ function buildModelSeries(
       stroke: colorOf(i),
       width: 2,
       paths: modelPaths,
+      spanGaps: false,
       value: (_u, _raw, v) => {
         if (v == null) return '—'
         if (metric === 'token') return formatCount(v)
@@ -451,7 +521,7 @@ function buildModelSeries(
   }
   if (tail.length > 0) {
     // 先累加原始聚合量再算值：速度必须加权（Σ输出/Σ解码时长），不能把各组 tok/s 直接相加
-    const merged = Array.from({ length: days.length }, emptyTimingBucket)
+    const merged = Array.from({ length: keys.length }, emptyTimingBucket)
     for (const [, entry] of tail) {
       for (let i = 0; i < merged.length; i++) {
         const b = entry.ys[i] ?? emptyTimingBucket()
@@ -472,6 +542,7 @@ function buildModelSeries(
       stroke: colorOf(defs.length),
       width: 2,
       paths: modelPaths,
+      spanGaps: false,
       value: (_u, _raw, v) => {
         if (v == null) return '—'
         if (metric === 'token') return formatCount(v)
@@ -482,5 +553,5 @@ function buildModelSeries(
     })
     ys.push(merged.map((b) => bucketValue(metric, b)))
   }
-  return { days: [...days], ys, defs }
+  return { ys, defs }
 }
