@@ -33,7 +33,9 @@ const TABLE: Record<string, ModelPrice> = {
   'deepseek-v4.1-flash': { input: 2.0, output: 8.0, cacheInput: 0.04 },
   'deepseek-v4-pro': { input: 9.0, output: 27.0, cacheInput: 0.3 },
   'minimax-m3': { input: 4.2, output: 16.8, cacheInput: 0.84 },
-  'GLM-5.3-Flash': { input: 0.4, output: 1.4, cacheInput: 0.115 },
+  // GLM-5.3-Flash（智谱官方标价：输入 0.8 / 输出 2.8 / 缓存命中 0.23 元/1M；
+  // 按原价记，不含限时折扣——发布期五折已于 2026-09-09 结束）
+  'GLM-5.3-Flash': { input: 0.8, output: 2.8, cacheInput: 0.23 },
   'GLM-5.3': { input: 8.0, output: 28.0, cacheInput: 2.0 },
   'mimo-v2.5-pro': { input: 3.0, output: 6.0, cacheInput: 0.025 },
   'kimi-for-coding': { input: 6.84, output: 27.0, cacheInput: 1.37 },
