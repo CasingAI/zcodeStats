@@ -85,6 +85,7 @@ const TABLE: Record<string, ModelPrice> = {
  *
  * 同模型不同路由会同时给多个 key：
  *   - openrouter/sonoma/stealth/* → GLM-5.3-Flash（伪装路由）
+ *   - omen-alpha → GLM-5.3-Flash
  *   - minimax-m3:free / minimax/minimax-m3:free → minimax-m3（:free 是免费档路由）
  *   - deepseek-latest / deepseek-latest:free → deepseek-v4-flash（"latest" 当前指 v4-flash）
  */
@@ -98,6 +99,7 @@ const BUILTIN_ALIASES_LC: Record<string, string> = {
   'stealth/ox-alpha': 'GLM-5.3-Flash',
   'stealth/ox': 'GLM-5.3-Flash',
   'stealth': 'GLM-5.3-Flash',
+  'omen-alpha': 'GLM-5.3-Flash',
   'minimax/minimax-m3:free': 'minimax-m3',
   'minimax-m3:free': 'minimax-m3',
   'space-bunny-free': 'space-bunny',
