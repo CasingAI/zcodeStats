@@ -71,6 +71,9 @@ const TABLE: Record<string, ModelPrice> = {
   // ¥1.44/M，缓存读 $0.002/M → ¥0.0144/M，同 gpt-5.3-codex-spark ×7.2 口径；
   // 注意 contributor 是白名单专供价，比标准版 muse-spark-1.3 便宜一个量级）
   'muse-spark-1.3-contributor': { input: 0.72, output: 1.44, cacheInput: 0.0144 },
+  // Space Bunny（ZCode 内置美元价 $0.15 / $0.60 / 缓存读 $0.03，按 ×7.2 折人民币，
+  // 与 gpt-5.3-codex-spark 同一汇率口径；缓存写未给价，按约定并入输入价）
+  'space-bunny': { input: 1.08, output: 4.32, cacheInput: 0.216 },
 }
 
 /**
@@ -95,6 +98,7 @@ const BUILTIN_ALIASES_LC: Record<string, string> = {
   'stealth': 'GLM-5.3-Flash',
   'minimax/minimax-m3:free': 'minimax-m3',
   'minimax-m3:free': 'minimax-m3',
+  'space-bunny-free': 'space-bunny',
   'deepseek-latest': 'deepseek-v4-flash',
   'deepseek-latest:free': 'deepseek-v4-flash',
   'deepseek-flash': 'deepseek-v4.1-flash',
@@ -171,6 +175,7 @@ const DISPLAY_NAMES: Record<string, string> = {
   'claude-haiku-4.5': 'Claude Haiku 4.5',
   'composer-2.5': 'Composer 2.5',
   'muse-spark-1.3-contributor': 'Muse Spark 1.3 Contributor',
+  'space-bunny': 'Space Bunny',
 }
 
 function fallbackDisplayName(key: string): string {
